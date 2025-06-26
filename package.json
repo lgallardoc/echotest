@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "server": "ts-node tcp-server.ts",
+    "client": "ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 1",
+    "start": "ts-node tcp-server.ts"
   },
   "repository": {
     "type": "git",
@@ -25,5 +28,9 @@
     "ts-jest": "^29.3.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "iso8583-js": "^2.0.0"
   }
 }
