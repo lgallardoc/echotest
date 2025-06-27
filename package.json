@@ -1,19 +1,21 @@
 {
   "name": "echotest",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "TCP/IP Echo Test Client and Server for ISO 8583",
+  "main": "dist/tcp-server.js",
   "scripts": {
+    "build": "tsc",
+    "start": "node dist/tcp-server.js",
+    "client": "node dist/tcp-client.js",
     "test": "jest",
-    "server": "ts-node tcp-server.ts",
-    "client": "ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 1",
-    "start": "ts-node tcp-server.ts"
+    "dev:server": "ts-node tcp-server.ts",
+    "dev:client": "ts-node tcp-client.ts"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lgallardoc/echotest.git"
   },
-  "keywords": [],
+  "keywords": ["tcp", "iso8583", "echo-test", "network"],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -22,15 +24,17 @@
   },
   "homepage": "https://github.com/lgallardoc/echotest#readme",
   "devDependencies": {
-    "@types/jest": "^29.5.14",
-    "@types/node": "^22.15.17",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.3.2",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.8.3"
+    "@types/jest": "^29.5.0",
+    "@types/node": "^18.15.11",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.4"
   },
   "dependencies": {
-    "dotenv": "^16.5.0",
-    "iso8583-js": "^2.0.0"
+    "@types/winston": "^2.4.4",
+    "dotenv": "^16.0.3",
+    "iso8583-js": "^1.0.0",
+    "winston": "^3.8.2"
   }
 }

@@ -1,313 +1,365 @@
-# EchoTest - Cliente TCP/IP para Pruebas ISO 8583
+# EchoTest - TCP/IP Echo Test Client and Server for ISO 8583
 
-Este proyecto implementa un cliente TCP/IP avanzado para realizar pruebas de conexión (Echo Test) utilizando el protocolo ISO 8583, comúnmente usado en sistemas de procesamiento de transacciones financieras. Incluye capacidades de carga masiva, medición de rendimiento y generación de reportes detallados.
+Sistema completo de pruebas de carga para protocolo ISO 8583 con cliente y servidor TCP/IP multi-threaded.
 
-## 🚀 Características Principales
+## 🚀 Características
 
-- **Cliente TCP/IP robusto** para pruebas ISO 8583
-- **Ejecución de múltiples iteraciones** con control de carga
-- **Medición de tiempos de respuesta** en tiempo real
-- **Generación de reportes HTML** con métricas detalladas
-- **Configuración flexible** de parámetros de conexión
-- **Manejo robusto de errores** y timeouts
-- **Servidor de prueba incluido** para desarrollo local
+- **Servidor Multi-Worker**: 16 workers (uno por CPU core)
+- **Cliente Multi-Hilo**: Ejecución paralela de iteraciones
+- **Protocolo ISO 8583**: Implementación completa del estándar
+- **Reportes HTML**: Métricas detalladas con gráficos
+- **Logs Organizados**: Separación en directorios `log/` y `tmp/`
+- **Configuración Flexible**: Parámetros configurables via línea de comandos
+- **Manejo Robusto de Errores**: Timeouts, reconexiones y logging detallado
 
-## 📋 Descripción
+## 📋 Requisitos
 
-El proyecto consiste en:
+- Node.js 16+
+- npm o pnpm
 
-### Cliente TCP/IP (`tcp-client.ts`)
+## 🛠️ Instalación Rápida
 
-- Establece conexiones TCP/IP con servidores ISO 8583
-- Genera y envía mensajes ISO 8583 de prueba (Echo Test)
-- Procesa y desglosa las respuestas recibidas
-- Ejecuta múltiples iteraciones con control de delays
-- Mide tiempos de respuesta y genera estadísticas
-- Crea reportes HTML detallados con métricas de rendimiento
+### Opción 1: Instalación Automática
 
-### Servidor de Prueba (`tcp-server.ts`)
+```bash
+# Clonar el repositorio
+git clone <repository-url>
+cd echotest
 
-- Servidor TCP/IP local para pruebas de desarrollo
-- Simula respuestas ISO 8583 estándar
-- Maneja múltiples conexiones simultáneas
-- Logging detallado para debugging
+# Ejecutar script de instalación automática
+chmod +x install.sh
+./install.sh
+```
 
-## 🛠️ Tecnologías Utilizadas
+### Opción 2: Instalación Manual
 
-- **TypeScript** - Lenguaje principal del proyecto
-- **Node.js** - Runtime de JavaScript
-- **Net** - Módulo nativo para TCP/IP
-- **ISO8583-js** - Biblioteca para manejo de mensajes ISO 8583
-- **Jest** - Framework de pruebas unitarias
-- **ts-node** - Ejecución directa de TypeScript
+```bash
+# Clonar el repositorio
+git clone <repository-url>
+cd echotest
 
-## 📦 Estructura del Proyecto
+# Instalar dependencias
+npm install
+
+# Compilar TypeScript a JavaScript
+npm run build
+# o
+npx tsc
+
+# Crear directorios necesarios
+mkdir -p tmp log
+```
+
+Los archivos compilados se generan en el directorio `dist/`.
+
+## 🚀 Ejecución
+
+### Opción 1: Con TypeScript (Desarrollo)
+
+```bash
+# Servidor
+npm run dev:server
+# o
+ts-node tcp-server.ts
+
+# Cliente
+npm run dev:client -- --ip 127.0.0.1 --pt 6020 --it 100 --th 5
+# o
+ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 100 --th 5
+```
+
+### Opción 2: Con JavaScript (Producción)
+
+```bash
+# Servidor
+npm start
+# o
+node dist/tcp-server.js
+
+# Cliente
+npm run client -- --ip 127.0.0.1 --pt 6020 --it 100 --th 5
+# o
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 100 --th 5
+```
+
+### Opción 3: Scripts de Ejecución (Después de install.sh)
+
+```bash
+# Servidor
+./run-server.sh
+
+# Cliente
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 5
+```
+
+## 📖 Uso del Cliente
+
+### Parámetros Disponibles
+
+```bash
+ts-node tcp-client.ts [opciones]
+# o
+node dist/tcp-client.js [opciones]
+
+Opciones:
+  --ip <ip>           Dirección IP del servidor (default: 10.245.229.25)
+  --pt <puerto>       Puerto del servidor (default: 6020)
+  --it <iteraciones>  Número de iteraciones (default: 1)
+  --dl <delay>        Delay entre iteraciones en ms (default: 0)
+  --th <hilos>        Número de hilos para paralelización (default: 1)
+  --help              Mostrar ayuda
+```
+
+### Ejemplos de Uso
+
+```bash
+# Prueba básica
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 10 --th 2
+
+# Prueba de carga
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --dl 50
+
+# Prueba de rendimiento
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 500 --th 10 --dl 0
+
+# Prueba con servidor remoto
+node dist/tcp-client.js --ip 192.168.1.100 --pt 8080 --it 1000 --th 8
+
+# Prueba de estrés
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 2000 --th 20 --dl 0
+```
+
+## 📊 Reportes y Logs
+
+### Estructura de Archivos
 
 ```
 echotest/
-├── tcp-client.ts              # Cliente TCP/IP principal
-├── tcp-server.ts              # Servidor de prueba local
-├── tcp-client.test.ts         # Pruebas unitarias
-├── iso8583-js.d.ts            # Definiciones de tipos para ISO8583
-├── package.json               # Dependencias y scripts
-├── tsconfig.json              # Configuración de TypeScript
-├── jest.config.js             # Configuración de Jest
-├── README.md                  # Documentación del proyecto
-└── echotest_report_*.html     # Reportes generados automáticamente
+├── dist/                                    # Archivos JavaScript compilados
+│   ├── tcp-server.js
+│   ├── tcp-client.js
+│   └── ...
+├── tmp/                                     # Reportes HTML
+│   ├── echotest_report_127_0_0_1_6020_2025-06-27_21-01-45.html
+│   └── ...
+├── log/                                     # Archivos de log
+│   ├── echotest_2025-06-26.log             # Logs del cliente
+│   └── server.log                          # Logs del servidor
+├── tcp-server.ts                           # Servidor TypeScript
+├── tcp-client.ts                           # Cliente TypeScript
+├── install.sh                              # Script de instalación automática
+├── run-server.sh                           # Script para ejecutar servidor
+├── run-client.sh                           # Script para ejecutar cliente
+└── ...
 ```
 
-## ⚙️ Requisitos Previos
+### Contenido de los Reportes
 
-- **Node.js** (versión 14.x o superior)
-- **npm** o **pnpm** (gestor de paquetes)
-- **TypeScript** (instalado globalmente o como dependencia)
+- **Métricas de Rendimiento**: Tiempo de respuesta, tasa de éxito
+- **Gráficos de Carga**: Visualización por hilo y tiempo
+- **Desglose de Mensajes**: Request/Response ISO 8583 detallados
+- **Estadísticas**: Promedios, mínimos, máximos
+- **Análisis por Hilo**: Distribución de carga y rendimiento
 
-## 🔧 Instalación
+## 🔧 Configuración del Servidor
 
-1. **Clonar el repositorio:**
+### Variables de Entorno
 
 ```bash
-git clone https://github.com/lgallardoc/echotest.git
-cd echotest
+# Puerto del servidor (default: 6020)
+PORT=6020
+
+# Nivel de logging (debug, info, error)
+LOG_LEVEL=debug
 ```
 
-2. **Instalar dependencias:**
+### Configuración por Defecto
+
+- **Puerto**: 6020
+- **Workers**: 16 (uno por CPU core)
+- **Max Conexiones**: 200 por worker
+- **Backlog**: 128
+- **Timeout**: 30 segundos
+
+## 🧪 Testing
 
 ```bash
-npm install
-# o
-pnpm install
-```
-
-3. **Verificar instalación:**
-
-```bash
+# Ejecutar tests
 npm test
+
+# Tests específicos
+npm test -- tcp-client.test.ts
 ```
 
-## 🚀 Uso
+## 📝 Protocolo ISO 8583
 
-### Parámetros del Cliente
+### Mensajes Soportados
 
-El cliente acepta los siguientes parámetros:
+- **MTI 0800**: Network Management Request (Echo Test)
+- **MTI 0810**: Network Management Response
 
-| Parámetro | Descripción                  | Valor por defecto | Ejemplo          |
-| --------- | ---------------------------- | ----------------- | ---------------- |
-| `--ip`    | Dirección IP del servidor    | `10.245.229.25`   | `--ip 127.0.0.1` |
-| `--pt`    | Puerto del servidor          | `6020`            | `--pt 8080`      |
-| `--it`    | Número de iteraciones        | `1`               | `--it 100`       |
-| `--dl`    | Delay entre iteraciones (ms) | `0`               | `--dl 50`        |
+### Campos Configurados
 
-### Ejemplos de Ejecución
+- **Campo 7**: Transmission Date & Time (MMDDhhmmss)
+- **Campo 11**: Systems Trace Audit Number (STAN)
+- **Campo 37**: Retrieval Reference Number (RRN)
+- **Campo 39**: Response Code (00=Approved, 96=System malfunction)
+- **Campo 70**: Network Management Information Code (301=Echo Test)
 
-#### 1. Ejecución Básica (1 iteración)
+### Formato de Mensaje
+
+```
+Header de longitud (4 bytes ASCII) + Mensaje ISO 8583 (ASCII)
+Ejemplo: "0051" + "080002200000080000000626210145435913005132435913301"
+```
+
+## 🚀 Despliegue en Producción
+
+### 1. Compilar el Proyecto
 
 ```bash
-ts-node tcp-client.ts
+npm run build
 ```
 
-#### 2. Conexión a Servidor Local
+### 2. Copiar Archivos Necesarios
 
 ```bash
-ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020
+# En el servidor de producción
+mkdir echotest-prod
+cp -r dist/ echotest-prod/
+cp package.json echotest-prod/
+cp .env echotest-prod/  # si existe
+cp install.sh echotest-prod/
 ```
 
-#### 3. Prueba de Carga (100 iteraciones con delay)
+### 3. Instalar Dependencias de Producción
 
 ```bash
-ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 100 --dl 50
+cd echotest-prod
+npm install --production
 ```
 
-#### 4. Prueba de Rendimiento (500 iteraciones sin delay)
+### 4. Ejecutar
 
 ```bash
-ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 500 --dl 0
+# Servidor
+npm start
+
+# Cliente
+npm run client -- --ip <server-ip> --pt <port> --it <iterations> --th <threads>
 ```
 
-#### 5. Prueba de Estabilidad (1000 iteraciones)
+## 📈 Escenarios de Prueba Recomendados
+
+### 1. Prueba de Conectividad Básica
 
 ```bash
-ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 1000 --dl 10
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 1 --th 1
 ```
 
-### Iniciar Servidor de Prueba
+- **Propósito**: Verificar conectividad y respuesta básica
+- **Métricas**: Tiempo de respuesta, tasa de éxito
 
-Para pruebas locales, inicia el servidor de prueba:
+### 2. Prueba de Carga Moderada
 
 ```bash
-ts-node tcp-server.ts
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --dl 50
 ```
 
-El servidor se ejecutará en `127.0.0.1:6020` por defecto.
+- **Propósito**: Evaluar rendimiento bajo carga controlada
+- **Métricas**: TPS, latencia promedio, distribución de carga
 
-## 📊 Reportes Generados
-
-El cliente genera automáticamente reportes HTML con:
-
-- **Métricas de rendimiento** (min, max, promedio)
-- **Estadísticas de éxito/fallo**
-- **Detalles de cada iteración**
-- **Gráficos de tiempos de respuesta**
-- **Información de configuración**
-
-Los reportes se guardan como: `echotest_report_[IP]_[PUERTO]_[FECHA].html`
-
-## 🔍 Formato del Mensaje ISO 8583
-
-### Mensaje de Request (Echo Test)
-
-```
-MTI: 0800 (Network Management Request)
-Bitmap: 0220000008000000
-Campo 7: Fecha y hora (MMDDhhmmss)
-Campo 11: STAN - Número de rastreo del sistema
-Campo 37: RRN - Retrieval Reference Number
-Campo 70: Código de gestión (301 para Echo Test)
-```
-
-### Mensaje de Response
-
-```
-MTI: 0810 (Network Management Response)
-Bitmap: 022000000a000000
-Campo 7: Fecha y hora de respuesta
-Campo 11: STAN (mismo que request)
-Campo 37: RRN (mismo que request)
-Campo 39: Response Code (00 = Approved)
-Campo 70: Código de gestión (301)
-```
-
-## 🧪 Pruebas
-
-### Ejecutar Pruebas Unitarias
+### 3. Prueba de Rendimiento
 
 ```bash
-npm test
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 500 --th 10 --dl 0
 ```
 
-### Ejecutar Pruebas con Coverage
+- **Propósito**: Medir capacidad máxima del sistema
+- **Métricas**: Throughput máximo, límites de concurrencia
+
+### 4. Prueba de Estrés
 
 ```bash
-npm run test:coverage
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 2000 --th 20 --dl 0
 ```
 
-### Pruebas de Integración
+- **Propósito**: Identificar límites y puntos de falla
+- **Métricas**: Comportamiento bajo estrés, errores
 
-```bash
-# Terminal 1: Iniciar servidor
-ts-node tcp-server.ts
-
-# Terminal 2: Ejecutar cliente
-ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 10
-```
-
-## 📈 Métricas de Rendimiento
-
-### Ejemplo de Resultados (500 iteraciones, 0ms delay)
-
-- **Tiempo total**: ~3 segundos
-- **Tiempo promedio por iteración**: ~6ms
-- **Tasa de éxito**: 100%
-- **Conexiones simultáneas**: Maneja bien 500+ conexiones
-
-### Factores de Rendimiento
-
-- **Delay entre iteraciones**: Controla la carga del servidor
-- **Número de iteraciones**: Determina la duración total del test
-- **Configuración de timeouts**: Afecta la robustez de las conexiones
-
-## 🐛 Troubleshooting
+## 🔍 Troubleshooting
 
 ### Problemas Comunes
 
-1. **Error de conexión rechazada**
+1. **Puerto en uso**: Cambiar el puerto en `.env` o usar `--pt`
+2. **Permisos**: Verificar permisos de escritura en directorios `log/` y `tmp/`
+3. **Dependencias**: Ejecutar `npm install` si faltan módulos
+4. **Compilación**: Verificar que `tsconfig.json` esté configurado correctamente
+5. **EADDRINUSE**: El puerto ya está en uso, cambiar puerto o detener proceso existente
 
-   - Verificar que el servidor esté ejecutándose
-   - Confirmar IP y puerto correctos
+### Logs de Debug
 
-2. **Timeouts frecuentes**
+```bash
+# Activar logs detallados
+LOG_LEVEL=debug npm start
 
-   - Aumentar el delay entre iteraciones
-   - Verificar la capacidad del servidor
+# Ver logs en tiempo real
+tail -f log/server.log
+tail -f log/echotest_$(date +%Y-%m-%d).log
 
-3. **Errores de ISO 8583**
-   - Verificar la configuración del servidor
-   - Revisar logs del servidor
-
-### Logs y Debugging
-
-El cliente incluye logging detallado:
-
-- `[info]` - Información general
-- `[debug]` - Detalles técnicos
-- `[error]` - Errores y problemas
-
-## 🔧 Configuración Avanzada
-
-### Modificar Timeouts
-
-```typescript
-// En tcp-client.ts
-const CONNECTION_TIMEOUT = 5000; // 5 segundos
-const RESPONSE_TIMEOUT = 5000; // 5 segundos
+# Ver logs del servidor
+tail -f log/server.log | grep "Nueva conexión"
+tail -f log/server.log | grep "Error"
 ```
 
-### Personalizar Mensajes ISO 8583
+### Interpretación de Resultados
 
-```typescript
-// En tcp-client.ts, función createIso8583EchoTestMessage()
-const isoMessage = new ISO8583();
-isoMessage.setField(0, "0800"); // MTI
-isoMessage.setField(7, dateTime); // Campo 7
-// ... más campos
+- **TPS > 100**: Excelente rendimiento
+- **TPS 50-100**: Buen rendimiento
+- **TPS 10-50**: Rendimiento aceptable
+- **TPS < 10**: Posibles problemas de red/servidor
+
+## 🛠️ Scripts Disponibles
+
+### NPM Scripts
+
+```bash
+npm run build          # Compilar TypeScript
+npm start              # Ejecutar servidor (JavaScript)
+npm run client         # Ejecutar cliente (JavaScript)
+npm run dev:server     # Ejecutar servidor (TypeScript)
+npm run dev:client     # Ejecutar cliente (TypeScript)
+npm test               # Ejecutar tests
 ```
 
-## 📝 Scripts Disponibles
+### Scripts de Shell (después de install.sh)
 
-```json
-{
-  "scripts": {
-    "start": "ts-node tcp-client.ts",
-    "server": "ts-node tcp-server.ts",
-    "test": "jest",
-    "test:coverage": "jest --coverage",
-    "build": "tsc",
-    "dev": "ts-node-dev tcp-client.ts"
-  }
-}
+```bash
+./install.sh           # Instalación automática
+./run-server.sh        # Ejecutar servidor
+./run-client.sh        # Ejecutar cliente con parámetros
 ```
+
+## 📄 Licencia
+
+ISC License
 
 ## 🤝 Contribución
 
 1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
+2. Crear una rama para tu feature (`git checkout -b feature/AmazingFeature`)
 3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
 4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
+5. Abrir un Pull Request
 
-### Guías de Contribución
+## 📞 Soporte
 
-- Mantén el código limpio y bien documentado
-- Agrega pruebas para nuevas funcionalidades
-- Sigue las convenciones de TypeScript
-- Actualiza la documentación según sea necesario
+Para soporte técnico o preguntas:
 
-## 📄 Licencia
-
-Este proyecto está bajo la Licencia ISC. Ver el archivo `LICENSE` para más detalles.
-
-## 📞 Contacto
-
-- **Repositorio**: https://github.com/lgallardoc/echotest
-- **Issues**: https://github.com/lgallardoc/echotest/issues
-- **Pull Requests**: https://github.com/lgallardoc/echotest/pulls
-
-## 🙏 Agradecimientos
-
-- Biblioteca `iso8583-js` para el manejo de mensajes ISO 8583
-- Comunidad de Node.js y TypeScript
-- Contribuidores y usuarios del proyecto
+- Crear un issue en GitHub
+- Revisar la documentación del proyecto
+- Verificar los logs de ejecución
 
 ---
 
-**Nota**: Este proyecto está diseñado para pruebas y desarrollo. Para uso en producción, asegúrate de implementar las medidas de seguridad apropiadas.
+**EchoTest** - Herramienta profesional para pruebas de carga y rendimiento en sistemas ISO 8583 🚀

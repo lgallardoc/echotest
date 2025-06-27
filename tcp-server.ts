@@ -1,179 +1,265 @@
 /// <reference path="./iso8583-js.d.ts" />
+/// <reference types="node" />
 import * as net from 'net';
 import * as dotenv from 'dotenv';
 import ISO8583 = require('iso8583-js');
+import * as winston from 'winston';
+const cluster: any = require('cluster');
+import * as os from 'os';
 
 // Cargar variables de entorno
 dotenv.config();
 
-// Función para generar el log con el formato deseado
-function log(message: string, level: 'debug' | 'info' | 'error' = 'debug'): void {
-    const logLevel = process.env.LOG_LEVEL || 'debug';
-    if (logLevel === 'debug' || (logLevel === 'info' && level !== 'debug') || (logLevel === 'error' && level === 'error')) {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = (now.getMonth() + 1).toString().padStart(2, '0');
-        const day = now.getDate().toString().padStart(2, '0');
-        const hours = now.getHours().toString().padStart(2, '0');
-        const minutes = now.getMinutes().toString().padStart(2, '0');
-        const seconds = now.getSeconds().toString().padStart(2, '0');
-        const milliseconds = now.getMilliseconds().toString().padStart(3, '0');
-        const logMsg = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds} [${level}] ${message}`;
-        if (level === 'error') {
-            console.error(logMsg);
-        } else {
-            console.log(logMsg);
-        }
-    }
-}
-
-// Función para deserializar el mensaje ISO 8583 recibido
-function deserializeIso8583Message(response: string): Record<string, string> {
-    // Los primeros 4 caracteres son la longitud
-    const body = response.substring(4);
-    
-    // Verificar que el mensaje tenga al menos el MTI y bitmap
-    if (body.length < 20) {
-        throw new Error('Mensaje demasiado corto');
-    }
-    
-    const mti = body.substring(0, 4);
-    const bitmap = body.substring(4, 20);
-    
-    // Para mensajes simples, solo extraer los campos básicos
-    const result: Record<string, string> = {
-        MTI: mti,
-        Bitmap: bitmap
-    };
-    
-    // Extraer campos adicionales si están presentes
-    let position = 20;
-    
-    // Campo 7 (10 caracteres) - Transaction Date/Time
-    if (position + 10 <= body.length) {
-        result['7'] = body.substring(position, position + 10);
-        position += 10;
-    }
-    
-    // Campo 11 (6 caracteres) - STAN
-    if (position + 6 <= body.length) {
-        result['11'] = body.substring(position, position + 6);
-        position += 6;
-    }
-    
-    // Campo 37 (12 caracteres) - RRN
-    if (position + 12 <= body.length) {
-        result['37'] = body.substring(position, position + 12);
-        position += 12;
-    }
-    
-    // Campo 70 (3 caracteres) - Network Management Information Code
-    if (position + 3 <= body.length) {
-        result['70'] = body.substring(position, position + 3);
-    }
-    
-    return result;
-}
-
-// Función para crear una respuesta ISO 8583 de echo test
-function createIso8583EchoResponse(requestMessage: Record<string, string>): string {
-    // Crear instancia de ISO8583
-    const iso = new ISO8583();
-    
-    // Usar los mismos valores del request para la respuesta
-    iso.set(7, requestMessage['7']); // Fecha y hora del mensaje
-    iso.set(11, requestMessage['11']); // Número de rastreo del sistema
-    iso.set(37, requestMessage['37']); // RRN - Número de Referencia
-    iso.set(39, '00'); // Código de respuesta (00 = Aprobado)
-    iso.set(70, '301'); // Código de gestión (Echo Test)
-    
-    // Generar mensaje ISO 8583 de respuesta
-    const isoMessage = iso.wrapMsg('0810'); // MTI 0810 para Network Management Response
-    return isoMessage;
-}
-
-// Función para serializar el mensaje ISO 8583 a una cadena con header de longitud
+// Función para serializar mensaje ISO 8583 con header de longitud
 function serializeIso8583Message(message: string): string {
     const length = message.length.toString().padStart(4, '0');
-    return `${length}${message}`;
+    // Todo debe ser ASCII, no hexadecimal
+    return length + message;
 }
 
-// Crear servidor TCP
-const server = net.createServer((socket) => {
+// Configuración de logging
+const logger = winston.createLogger({
+    level: 'debug',
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.printf((info) => {
+            return `${info.timestamp} [${info.level}] ${info.message}`;
+        })
+    ),
+    transports: [
+        new winston.transports.Console(),
+        new winston.transports.File({ 
+            filename: 'log/server.log',
+            dirname: 'log'
+        })
+    ]
+});
+
+// Función para procesar una conexión individual
+function handleConnection(socket: net.Socket) {
     const clientAddress = `${socket.remoteAddress}:${socket.remotePort}`;
-    log(`Nueva conexión desde ${clientAddress}`, 'info');
-
-    // Manejar datos recibidos del cliente
+    logger.info(`Nueva conexión desde ${clientAddress}`);
+    
     socket.on('data', (data) => {
-        const request = data.toString();
-        log(`Mensaje recibido de ${clientAddress}: ${request}`, 'debug');
-
         try {
-            // Deserializar el mensaje recibido
-            const deserializedRequest = deserializeIso8583Message(request);
-            log(`Desglose del mensaje recibido: ${JSON.stringify(deserializedRequest)}`, 'debug');
-
-            // Verificar si es un mensaje de echo test (MTI 0800 y campo 70 = 301)
-            if (deserializedRequest.MTI === '0800' && deserializedRequest['70'] === '301') {
-                log('Mensaje de Echo Test detectado, generando respuesta...', 'info');
-
-                // Crear respuesta de echo test
-                const responseMessage = createIso8583EchoResponse(deserializedRequest);
-                log(`Respuesta generada: ${responseMessage}`, 'debug');
-
-                // Serializar y enviar respuesta
-                const serializedResponse = serializeIso8583Message(responseMessage);
-                log(`Enviando respuesta a ${clientAddress}: ${serializedResponse}`, 'debug');
-
-                socket.write(serializedResponse);
-                log(`Respuesta enviada exitosamente a ${clientAddress}`, 'info');
+            // El cliente envía el mensaje como bytes ASCII
+            // Los primeros 4 bytes son la longitud en ASCII
+            const lengthHeaderBytes = data.subarray(0, 4);
+            const messageBodyBytes = data.subarray(4);
+            
+            // Convertir el header de longitud de bytes a string ASCII
+            const lengthHeader = lengthHeaderBytes.toString('ascii');
+            const messageBody = messageBodyBytes.toString('ascii');
+            
+            logger.debug(`Header de longitud (ASCII): ${lengthHeader}, Cuerpo del mensaje (ASCII): ${messageBody}`);
+            
+            // Parsear el mensaje ISO 8583 usando el string ASCII del cuerpo
+            const iso8583 = new ISO8583();
+            logger.debug(`Intentando parsear mensaje: ${messageBody}`);
+            
+            let parsed: Map<string, any>;
+            let parsedObj: Record<string, string> = {};
+            
+            try {
+                parsed = iso8583.unWrapMsg(messageBody);
+                logger.debug(`Parsing exitoso, resultado: ${parsed}`);
+                
+                // Convertir el Map a un objeto para el logging
+                parsed.forEach((value: any, key: any) => {
+                    // Solo incluir campos que tienen valor
+                    if (value && value !== '') {
+                        parsedObj[key] = value;
+                        logger.debug(`Campo ${key}: ${value}`);
+                    }
+                });
+                
+                logger.debug(`Desglose del mensaje recibido: ${JSON.stringify(parsedObj)}`);
+            } catch (parseError) {
+                logger.error(`Error en parsing: ${parseError}`);
+                parsed = new Map();
+            }
+            
+            // Verificar si el parsing fue exitoso y si es un mensaje de Echo Test (MTI 0800)
+            const mti = parsed.get('TYPE');
+            logger.debug(`MTI detectado: ${mti}`);
+            
+            if (mti === '0800') {
+                logger.info('Mensaje de Echo Test detectado, generando respuesta...');
+                
+                // Crear respuesta de Echo Test (MTI 0810)
+                // Mantener los mismos campos del request
+                const field7 = parsedObj['7'] || '';
+                const field11 = parsedObj['11'] || '';
+                const field37 = parsedObj['37'] || '';
+                const field70 = parsedObj['70'] || '301';
+                
+                // Crear nueva instancia para la respuesta
+                const responseIso = new ISO8583();
+                responseIso.set(7, field7); // Transmission Date & Time (mantener del request)
+                responseIso.set(11, field11); // Systems Trace Audit Number (mantener del request)
+                responseIso.set(37, field37); // Retrieval Reference Number (mantener del request)
+                responseIso.set(39, '00'); // Response Code (00 = Approved)
+                responseIso.set(70, field70); // Network Management Information Code (mantener del request)
+                
+                logger.debug(`Campos configurados en respuesta: 7=${field7}, 11=${field11}, 37=${field37}, 39=00, 70=${field70}`);
+                
+                const responseMessage = responseIso.wrapMsg('0810');
+                logger.debug(`Respuesta generada: ${responseMessage}`);
+                
+                // Parsear la respuesta generada para verificar
+                const responseParsed = responseIso.unWrapMsg(responseMessage);
+                const responseParsedObj: Record<string, string> = {};
+                responseParsed.forEach((value: any, key: any) => {
+                    // Solo incluir campos que tienen valor
+                    if (value && value !== '') {
+                        responseParsedObj[key] = value;
+                    }
+                });
+                logger.debug(`Respuesta parseada: ${JSON.stringify(responseParsedObj)}`);
+                
+                // Enviar respuesta con header de longitud ASCII
+                const responseWithHeader = serializeIso8583Message(responseMessage);
+                const responseBuffer = Buffer.from(responseWithHeader, 'ascii');
+                socket.write(responseBuffer);
+                logger.debug(`Enviando respuesta a ${clientAddress}: ${responseWithHeader}`);
+                logger.info(`Respuesta enviada exitosamente a ${clientAddress}`);
             } else {
-                log(`Mensaje no reconocido como Echo Test. MTI: ${deserializedRequest.MTI}, Campo 70: ${deserializedRequest['70']}`, 'error');
+                logger.warn(`Mensaje con MTI no reconocido: ${mti}`);
                 // Enviar respuesta de error
-                const errorResponse = '00040810'; // Respuesta de error simple
-                socket.write(errorResponse);
+                const errorIso = new ISO8583();
+                errorIso.set(39, '96'); // Response Code (96 = System malfunction)
+                errorIso.set(70, '301'); // Network Management Information Code
+                const errorMessage = errorIso.wrapMsg('0810');
+                const errorWithHeader = serializeIso8583Message(errorMessage);
+                const errorBuffer = Buffer.from(errorWithHeader, 'ascii');
+                socket.write(errorBuffer);
             }
         } catch (error) {
-            log(`Error procesando mensaje: ${error}`, 'error');
+            logger.error(`Error procesando mensaje de ${clientAddress}: ${error}`);
             // Enviar respuesta de error
-            const errorResponse = '00040810'; // Respuesta de error simple
-            socket.write(errorResponse);
+            try {
+                const iso8583 = new ISO8583();
+                iso8583.set(39, '96'); // Response Code (96 = System malfunction)
+                iso8583.set(70, '301'); // Network Management Information Code
+                const errorMessage = iso8583.wrapMsg('0810');
+                const errorWithHeader = serializeIso8583Message(errorMessage);
+                const errorBuffer = Buffer.from(errorWithHeader, 'ascii');
+                socket.write(errorBuffer);
+            } catch (packError) {
+                logger.error(`Error enviando respuesta de error: ${packError}`);
+            }
         }
     });
-
-    // Manejar cierre de conexión
+    
     socket.on('close', () => {
-        log(`Conexión cerrada con ${clientAddress}`, 'info');
+        logger.info(`Conexión cerrada con ${clientAddress}`);
+    });
+    
+    socket.on('error', (error) => {
+        logger.error(`Error en conexión con ${clientAddress}: ${error}`);
+    });
+}
+
+// Función para crear un worker del servidor
+function createServerWorker(port: number) {
+    // Limitar backlog y maxConnections
+    const server = net.createServer();
+    server.maxConnections = 200; // Limitar conexiones concurrentes
+
+    server.on('connection', (socket) => {
+        socket.setTimeout(30000); // 30 segundos
+        socket.on('timeout', () => {
+            logger.warn(`Timeout en conexión ${socket.remoteAddress}:${socket.remotePort}`);
+            socket.destroy();
+        });
+        socket.on('error', (err) => {
+            logger.error(`Error en socket: ${err}`);
+            socket.destroy();
+        });
+        handleConnection(socket);
     });
 
-    // Manejar errores de conexión
-    socket.on('error', (err) => {
-        log(`Error en conexión con ${clientAddress}: ${err.message}`, 'error');
+    server.on('error', (error) => {
+        logger.error(`Error en servidor: ${error}`);
     });
-});
 
-// Configuración del servidor
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 6020;
-const HOST = process.env.HOST || '127.0.0.1';
-
-// Iniciar servidor
-server.listen(PORT, HOST, () => {
-    log(`Servidor TCP ISO 8583 Echo Test iniciado en ${HOST}:${PORT}`, 'info');
-    log('Esperando conexiones de clientes...', 'info');
-});
-
-// Manejar errores del servidor
-server.on('error', (err) => {
-    log(`Error del servidor: ${err.message}`, 'error');
-});
-
-// Manejar cierre del servidor
-process.on('SIGINT', () => {
-    log('Cerrando servidor...', 'info');
-    server.close(() => {
-        log('Servidor cerrado', 'info');
-        process.exit(0);
+    // Limitar backlog a 128
+    server.listen(port, undefined, 128, () => {
+        logger.info(`Worker ${process.pid} iniciado en puerto ${port}`);
     });
-});
 
-export { server }; 
+    return server;
+}
+
+// Función principal
+function main() {
+    const port = parseInt(process.env.PORT || '6020');
+    
+    let workerCrashes: {[pid: string]: number} = {};
+
+    if ((cluster as any).isPrimary) {
+        logger.info(`Servidor maestro iniciado (PID: ${process.pid})`);
+        logger.info(`Iniciando workers en puerto ${port}...`);
+        const numCPUs = os.cpus().length;
+        logger.info(`Creando ${numCPUs} workers...`);
+        for (let i = 0; i < numCPUs; i++) {
+            cluster.fork();
+        }
+        cluster.on('exit', (worker: any, code: any, signal: any) => {
+            logger.warn(`Worker ${worker.process.pid} murió. Reiniciando...`);
+            const now = Date.now();
+            workerCrashes[worker.process.pid] = (workerCrashes[worker.process.pid] || 0) + 1;
+            if (workerCrashes[worker.process.pid] > 5) {
+                logger.error(`Worker ${worker.process.pid} murió demasiadas veces. No se reiniciará automáticamente.`);
+                return;
+            }
+            cluster.fork();
+        });
+        cluster.on('listening', (worker: any, address: any) => {
+            logger.info(`Worker ${worker.process.pid} escuchando en ${address.address}:${address.port}`);
+        });
+        process.on('SIGINT', () => {
+            logger.info('Recibida señal SIGINT, cerrando servidor...');
+            for (const id in (cluster as any).workers) {
+                (cluster as any).workers[id]?.kill();
+            }
+            process.exit(0);
+        });
+        process.on('SIGTERM', () => {
+            logger.info('Recibida señal SIGTERM, cerrando servidor...');
+            for (const id in (cluster as any).workers) {
+                (cluster as any).workers[id]?.kill();
+            }
+            process.exit(0);
+        });
+    } else {
+        process.on('uncaughtException', (err) => {
+            logger.error(`[WORKER ${process.pid}] uncaughtException: ${err.stack || err}`);
+            process.exit(1);
+        });
+        process.on('unhandledRejection', (reason) => {
+            logger.error(`[WORKER ${process.pid}] unhandledRejection: ${reason}`);
+            process.exit(1);
+        });
+        logger.info(`[WORKER ${process.pid}] Arrancando worker...`);
+        createServerWorker(port);
+        
+        // Manejo de señales para workers
+        process.on('SIGINT', () => {
+            logger.info(`Worker ${process.pid} cerrando...`);
+            process.exit(0);
+        });
+        
+        process.on('SIGTERM', () => {
+            logger.info(`Worker ${process.pid} cerrando...`);
+            process.exit(0);
+        });
+    }
+}
+
+// Ejecutar el servidor
+if (require.main === module) {
+    main();
+}
+
+export { createServerWorker }; 

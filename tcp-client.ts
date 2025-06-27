@@ -26,36 +26,65 @@ export function createIso8583EchoTestMessage(): string {
     // Crear instancia de ISO8583
     const iso = new ISO8583();
     
-    // Establecer los campos del mensaje
-    iso.set(7, dateTime); // Fecha y hora del mensaje (MMDDhhmmss)
+    // Establecer los campos del mensaje con valores más cortos para evitar errores
+    iso.set(7, dateTime.substring(0, 10)); // Fecha y hora del mensaje (MMDDhhmmss) - limitado a 10 caracteres
     iso.set(11, stan); // Número de rastreo del sistema
     iso.set(37, rrn); // RRN - Número de Referencia
     iso.set(70, '301'); // Código de gestión (Echo Test)
     
     // Generar mensaje ISO 8583
     const isoMessage = iso.wrapMsg('0800'); // MTI 0800 para Network Management Request
+    
+    // Debug: Parsear el mensaje generado para ver qué campos están realmente presentes
+    try {
+        const debugIso = new ISO8583();
+        const debugParsed = debugIso.unWrapMsg(isoMessage);
+        const debugObj: Record<string, string> = {};
+        debugParsed.forEach((value: any, key: any) => {
+            if (value && value !== '') {
+                debugObj[key] = value;
+            }
+        });
+        console.log(`[DEBUG] Mensaje generado - campos con valor: ${JSON.stringify(debugObj)}`);
+    } catch (error) {
+        console.log(`[DEBUG] Error parseando mensaje generado: ${error}`);
+    }
+    
     return isoMessage;
 }
 
 // Serializar el mensaje ISO 8583 a una cadena con header de longitud
 export function serializeIso8583Message(message: string): string {
+    // El mensaje ya incluye el MTI, solo agregar el header de longitud
     const length = message.length.toString().padStart(4, '0');
-    return `${length}${message}`;
+    // El header de longitud debe ser ASCII, no hexadecimal
+    return length + message;
 }
 
 // Deserializar y desglosar el mensaje ISO 8583 recibido considerando header de longitud
 export function deserializeIso8583Message(response: string): Record<string, string> {
-    // Los primeros 4 caracteres son la longitud
-    const body = response.substring(4);
-    return {
-        MTI: body.substring(0, 4),
-        Bitmap: body.substring(4, 20),
-        '7': body.substring(20, 30),
-        '11': body.substring(30, 36),
-        '37': body.substring(36, 48),
-        '39': body.substring(48, 50),
-        '70': body.substring(50, 53),
-    };
+    try {
+        // Los primeros 4 caracteres son la longitud
+        const body = response.substring(4);
+        
+        // Parsear el mensaje ISO 8583 usando la librería
+        const iso = new ISO8583();
+        const parsed = iso.unWrapMsg(body);
+        
+        // Convertir el Map a un objeto para facilitar el manejo
+        const result: Record<string, string> = {};
+        parsed.forEach((value: any, key: any) => {
+            // Solo incluir campos que tienen valor
+            if (value && value !== '') {
+                result[key] = value;
+            }
+        });
+        
+        return result;
+    } catch (error) {
+        console.error('Error parsing ISO 8583 message:', error);
+        return {};
+    }
 }
 
 // Función para generar el log con el formato deseado
@@ -71,10 +100,42 @@ function log(message: string, level: 'debug' | 'info' | 'error' = 'debug'): void
         const seconds = now.getSeconds().toString().padStart(2, '0');
         const milliseconds = now.getMilliseconds().toString().padStart(3, '0');
         const logMsg = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}.${milliseconds} [${level}] ${message}`;
+        
+        // Mostrar en consola
         if (level === 'error') {
             console.error(logMsg);
         } else {
             console.log(logMsg);
+        }
+        
+        // Escribir en archivo de log
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Determinar la ruta correcta del directorio log
+            // Si estamos en dist/, subir un nivel para llegar al directorio raíz
+            let logDir: string;
+            if (__dirname.endsWith('dist')) {
+                logDir = path.join(__dirname, '..', 'log');
+            } else {
+                logDir = path.join(__dirname, 'log');
+            }
+            
+            // Crear directorio log si no existe
+            if (!fs.existsSync(logDir)) {
+                fs.mkdirSync(logDir, { recursive: true });
+            }
+            
+            // Crear nombre de archivo con fecha
+            const logFilename = `echotest_${year}-${month}-${day}.log`;
+            const logFilePath = path.join(logDir, logFilename);
+            
+            // Escribir log con salto de línea
+            fs.appendFileSync(logFilePath, logMsg + '\n', 'utf8');
+        } catch (error) {
+            // Si hay error escribiendo el log, solo mostrar en consola
+            console.error(`Error escribiendo log: ${error}`);
         }
     }
 }
@@ -82,15 +143,99 @@ function log(message: string, level: 'debug' | 'info' | 'error' = 'debug'): void
 // Interfaz para almacenar métricas de respuesta
 interface ResponseMetrics {
     iteration: number;
+    threadId: number;
     startTime: number;
     endTime: number;
     responseTime: number;
     success: boolean;
     error?: string;
+    timestamp: string;
+    requestMessage?: string;
+    requestDetails?: Record<string, string>;
+    responseMessage?: string;
+    responseDetails?: Record<string, string>;
 }
 
-// Función para generar reporte HTML
-function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: number, iterations: number, delay: number): string {
+// Interfaz para métricas de carga por tiempo
+interface LoadMetrics {
+    timestamp: string;
+    hour: string;
+    minute: string;
+    second: string;
+    count: number;
+}
+
+// Función para generar métricas de carga por tiempo
+function generateLoadMetrics(metrics: ResponseMetrics[]): LoadMetrics[] {
+    const loadMap = new Map<string, LoadMetrics>();
+    
+    metrics.forEach(metric => {
+        const date = new Date(metric.startTime);
+        const hour = date.getHours().toString().padStart(2, '0');
+        const minute = date.getMinutes().toString().padStart(2, '0');
+        const second = date.getSeconds().toString().padStart(2, '0');
+        const timestamp = `${hour}:${minute}:${second}`;
+        
+        if (!loadMap.has(timestamp)) {
+            loadMap.set(timestamp, {
+                timestamp,
+                hour,
+                minute,
+                second,
+                count: 0
+            });
+        }
+        
+        loadMap.get(timestamp)!.count++;
+    });
+    
+    return Array.from(loadMap.values()).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+}
+
+// Función para generar datos del gráfico de carga por hilos
+function generateLoadChartData(metrics: ResponseMetrics[]) {
+    // Agrupar métricas por hilo
+    const threadGroups = new Map<number, ResponseMetrics[]>();
+    
+    metrics.forEach(metric => {
+        if (!threadGroups.has(metric.threadId)) {
+            threadGroups.set(metric.threadId, []);
+        }
+        threadGroups.get(metric.threadId)!.push(metric);
+    });
+    
+    // Generar datos para cada hilo
+    const datasets: any[] = [];
+    const colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#00f2fe', '#43e97b', '#38f9d7'];
+    
+    threadGroups.forEach((threadMetrics, threadId) => {
+        // Ordenar métricas por tiempo de inicio
+        threadMetrics.sort((a, b) => a.startTime - b.startTime);
+        
+        // Crear puntos de datos (tiempo vs tiempo de respuesta en ms)
+        const data = threadMetrics.map((metric) => ({
+            x: metric.startTime, // Usar timestamp real
+            y: metric.responseTime // Tiempo de respuesta en milésimas de segundo
+        }));
+        
+        datasets.push({
+            label: `Hilo ${threadId}`,
+            data: data,
+            borderColor: colors[threadId - 1] || '#667eea',
+            backgroundColor: colors[threadId - 1] ? colors[threadId - 1] + '20' : '#667eea20',
+            borderWidth: 2,
+            fill: false,
+            tension: 0.1
+        });
+    });
+    
+    return {
+        datasets: datasets
+    };
+}
+
+// Función para generar reporte HTML con gráficos
+function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: number, iterations: number, delay: number, threads: number): string {
     const successfulMetrics = metrics.filter(m => m.success);
     const failedMetrics = metrics.filter(m => !m.success);
     
@@ -107,6 +252,10 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
     const now = new Date();
     const timestamp = now.toLocaleString();
     
+    // Generar métricas de carga por tiempo
+    const loadMetrics = generateLoadMetrics(metrics);
+    const loadChartData = generateLoadChartData(metrics);
+    
     return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -121,7 +270,7 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
             background-color: #f5f5f5;
         }
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             background-color: white;
             border-radius: 8px;
@@ -175,13 +324,69 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
             color: #666;
             margin-left: 5px;
         }
-        .details {
+        .charts-section {
             padding: 30px;
             border-top: 1px solid #e0e0e0;
         }
-        .details h2 {
+        .chart-container {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background-color: #fafafa;
+        }
+        .chart-container h3 {
+            margin: 0 0 20px 0;
             color: #333;
-            margin-bottom: 20px;
+            text-align: center;
+        }
+        .chart-canvas {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .details-section {
+            padding: 30px;
+            border-top: 1px solid #e0e0e0;
+        }
+        .iteration-details {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            background-color: #fafafa;
+        }
+        .iteration-header {
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .message-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 10px;
+        }
+        .message-box {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: white;
+        }
+        .message-box h4 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .field-list {
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .field-item {
+            margin: 2px 0;
+            padding: 2px 5px;
+            background-color: #f5f5f5;
+            border-radius: 3px;
         }
         .metrics-table {
             width: 100%;
@@ -200,7 +405,7 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
             color: #333;
         }
         .metrics-table tr:hover {
-            background-color: #f8f9fa;
+            background-color: #f5f5f5;
         }
         .success {
             color: #28a745;
@@ -208,23 +413,28 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
         .error {
             color: #dc3545;
         }
-        .summary {
-            background-color: #f8f9fa;
-            padding: 20px;
-            border-radius: 8px;
-            margin-top: 20px;
-        }
-        .summary h3 {
-            margin-top: 0;
-            color: #333;
-        }
-        .summary ul {
+        .thread-info {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
             margin: 10px 0;
-            padding-left: 20px;
         }
-        .summary li {
-            margin: 5px 0;
-            color: #666;
+        .chart-legend {
+            display: flex;
+            justify-content: center;
+            margin-top: 10px;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
         }
     </style>
 </head>
@@ -232,90 +442,245 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
     <div class="container">
         <div class="header">
             <h1>📊 Reporte Echo Test</h1>
-            <p>Análisis de rendimiento de conexiones TCP ISO 8583</p>
+            <p>${host}:${port} | ${timestamp}</p>
         </div>
         
         <div class="stats-grid">
             <div class="stat-card">
-                <h3>Iteraciones</h3>
+                <h3>Total Iteraciones</h3>
                 <div class="value">${iterations}</div>
-                <span class="unit">total</span>
             </div>
             <div class="stat-card">
-                <h3>Exitosas</h3>
+                <h3>Hilos Utilizados</h3>
+                <div class="value">${threads}</div>
+            </div>
+            <div class="stat-card">
+                <h3>Éxitos</h3>
                 <div class="value success">${successfulMetrics.length}</div>
-                <span class="unit">(${successRate.toFixed(1)}%)</span>
             </div>
             <div class="stat-card">
-                <h3>Fallidas</h3>
+                <h3>Fallos</h3>
                 <div class="value error">${failedMetrics.length}</div>
-                <span class="unit">iteraciones</span>
             </div>
             <div class="stat-card">
-                <h3>Tiempo Promedio</h3>
-                <div class="value">${avgTime.toFixed(2)}</div>
-                <span class="unit">ms</span>
-            </div>
-            <div class="stat-card">
-                <h3>Tiempo Mínimo</h3>
-                <div class="value">${minTime.toFixed(2)}</div>
-                <span class="unit">ms</span>
-            </div>
-            <div class="stat-card">
-                <h3>Tiempo Máximo</h3>
-                <div class="value">${maxTime.toFixed(2)}</div>
-                <span class="unit">ms</span>
+                <h3>Tasa de Éxito</h3>
+                <div class="value">${successRate.toFixed(2)}<span class="unit">%</span></div>
             </div>
             <div class="stat-card">
                 <h3>Tiempo Total</h3>
-                <div class="value">${totalTime.toFixed(2)}</div>
-                <span class="unit">ms</span>
+                <div class="value">${(totalTime / 1000).toFixed(2)}<span class="unit">s</span></div>
             </div>
             <div class="stat-card">
-                <h3>Pausa Entre Iteraciones</h3>
-                <div class="value">${delay}</div>
-                <span class="unit">ms</span>
+                <h3>Tiempo Promedio</h3>
+                <div class="value">${avgTime.toFixed(2)}<span class="unit">ms</span></div>
+            </div>
+            <div class="stat-card">
+                <h3>Tiempo Mínimo</h3>
+                <div class="value">${minTime.toFixed(2)}<span class="unit">ms</span></div>
+            </div>
+            <div class="stat-card">
+                <h3>Tiempo Máximo</h3>
+                <div class="value">${maxTime.toFixed(2)}<span class="unit">ms</span></div>
+            </div>
+            <div class="stat-card">
+                <h3>TPS Promedio</h3>
+                <div class="value">${totalTime > 0 ? ((successfulMetrics.length / (totalTime / 1000))).toFixed(2) : '0'}<span class="unit">tx/s</span></div>
             </div>
         </div>
-        
-        <div class="details">
-            <h2>📋 Detalles de la Ejecución</h2>
-            
-            <div class="summary">
-                <h3>Configuración</h3>
-                <ul>
-                    <li><strong>Servidor:</strong> ${host}:${port}</li>
-                    <li><strong>Iteraciones:</strong> ${iterations}</li>
-                    <li><strong>Pausa entre iteraciones:</strong> ${delay}ms</li>
-                    <li><strong>Fecha de ejecución:</strong> ${timestamp}</li>
-                </ul>
+
+        <div class="charts-section">
+            <div class="chart-container">
+                <h3>📈 Tiempo de Respuesta por Hilo vs Tiempo de Ejecución</h3>
+                <canvas id="loadChart" class="chart-canvas"></canvas>
+                <div class="chart-legend">
+                    ${Array.from({length: threads}, (_, i) => {
+                        const colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#00f2fe', '#43e97b', '#38f9d7'];
+                        const color = colors[i] || '#667eea';
+                        return `<div class="legend-item">
+                            <div class="legend-color" style="background-color: ${color};"></div>
+                            <span>Hilo ${i + 1}</span>
+                        </div>`;
+                    }).join('')}
+                </div>
             </div>
-            
-            <h3>📈 Métricas por Iteración</h3>
-            <table class="metrics-table">
-                <thead>
-                    <tr>
-                        <th>Iteración</th>
-                        <th>Estado</th>
-                        <th>Tiempo de Respuesta</th>
-                        <th>Error</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${metrics.map(m => `
-                        <tr>
-                            <td>${m.iteration}</td>
-                            <td class="${m.success ? 'success' : 'error'}">
-                                ${m.success ? '✅ Exitoso' : '❌ Fallido'}
-                            </td>
-                            <td>${m.success ? m.responseTime.toFixed(2) + ' ms' : '-'}</td>
-                            <td>${m.error || '-'}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
+        </div>
+
+        <div class="details-section">
+            <h2>📋 Detalles de Request y Response</h2>
+            ${metrics.map((metric, index) => `
+                <div class="iteration-details">
+                    <div class="iteration-header">
+                        Iteración ${metric.iteration} (Hilo ${metric.threadId}) - ${metric.success ? '✅ Exitoso' : '❌ Fallido'}
+                    </div>
+                    <div>⏱️ Tiempo de respuesta: ${metric.responseTime}ms</div>
+                    <div>🕐 Timestamp: ${metric.timestamp}</div>
+                    ${metric.requestDetails && metric.responseDetails ? `
+                        <div class="message-details">
+                            <div class="message-box">
+                                <h4>📤 Request (MTI 0800)</h4>
+                                <div class="field-list">
+                                    ${Object.entries(metric.requestDetails).map(([key, value]) => 
+                                        `<div class="field-item"><strong>${key}:</strong> ${value || '(vacío)'}</div>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                            <div class="message-box">
+                                <h4>📥 Response (MTI 0810)</h4>
+                                <div class="field-list">
+                                    ${Object.entries(metric.responseDetails).map(([key, value]) => 
+                                        `<div class="field-item"><strong>${key}:</strong> ${value || '(vacío)'}</div>`
+                                    ).join('')}
+                                </div>
+                            </div>
+                        </div>
+                    ` : '<div>⚠️ No hay detalles disponibles</div>'}
+                </div>
+            `).join('')}
         </div>
     </div>
+
+    <script>
+        // Datos del gráfico
+        const chartData = ${JSON.stringify(loadChartData)};
+
+        // Función para dibujar el gráfico
+        function drawChart() {
+            const canvas = document.getElementById('loadChart');
+            const ctx = canvas.getContext('2d');
+            
+            // Configurar dimensiones del canvas
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            
+            const width = canvas.width;
+            const height = canvas.height;
+            const padding = 60;
+            
+            // Limpiar canvas
+            ctx.clearRect(0, 0, width, height);
+            
+            if (chartData.datasets.length === 0) {
+                ctx.fillStyle = '#666';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('No hay datos para mostrar', width / 2, height / 2);
+                return;
+            }
+            
+            // Calcular escalas
+            let maxY = 0;
+            let minTime = Infinity;
+            let maxTime = -Infinity;
+            
+            chartData.datasets.forEach(dataset => {
+                dataset.data.forEach(point => {
+                    maxY = Math.max(maxY, point.y);
+                    minTime = Math.min(minTime, point.x);
+                    maxTime = Math.max(maxTime, point.x);
+                });
+            });
+            
+            const chartWidth = width - 2 * padding;
+            const chartHeight = height - 2 * padding;
+            const timeRange = maxTime - minTime || 1;
+            
+            // Dibujar ejes
+            ctx.strokeStyle = '#ddd';
+            ctx.lineWidth = 1;
+            
+            // Eje Y
+            ctx.beginPath();
+            ctx.moveTo(padding, padding);
+            ctx.lineTo(padding, height - padding);
+            ctx.stroke();
+            
+            // Eje X
+            ctx.beginPath();
+            ctx.moveTo(padding, height - padding);
+            ctx.lineTo(width - padding, height - padding);
+            ctx.stroke();
+            
+            // Dibujar líneas de cuadrícula
+            ctx.strokeStyle = '#f0f0f0';
+            ctx.lineWidth = 0.5;
+            
+            // Líneas horizontales
+            for (let i = 0; i <= 5; i++) {
+                const y = padding + (chartHeight / 5) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(width - padding, y);
+                ctx.stroke();
+            }
+            
+            // Etiquetas del eje Y
+            ctx.fillStyle = '#666';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= 5; i++) {
+                const value = Math.round((maxY / 5) * (5 - i));
+                const y = padding + (chartHeight / 5) * i;
+                ctx.fillText(value.toString(), padding - 5, y + 4);
+            }
+            
+            // Dibujar líneas para cada hilo
+            chartData.datasets.forEach((dataset, datasetIndex) => {
+                const color = dataset.borderColor;
+                
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                dataset.data.forEach((point, index) => {
+                    const x = padding + ((point.x - minTime) / timeRange) * chartWidth;
+                    const y = height - padding - (point.y / maxY) * chartHeight;
+                    
+                    if (index === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                
+                ctx.stroke();
+                
+                // Dibujar puntos
+                ctx.fillStyle = color;
+                dataset.data.forEach(point => {
+                    const x = padding + ((point.x - minTime) / timeRange) * chartWidth;
+                    const y = height - padding - (point.y / maxY) * chartHeight;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            });
+            
+            // Etiquetas del eje X (tiempos)
+            ctx.fillStyle = '#666';
+            ctx.font = '10px Arial';
+            ctx.textAlign = 'center';
+            
+            // Generar etiquetas de tiempo distribuidas uniformemente
+            const numLabels = 8;
+            for (let i = 0; i <= numLabels; i++) {
+                const time = minTime + (timeRange / numLabels) * i;
+                const x = padding + (chartWidth / numLabels) * i;
+                const timeStr = new Date(time).toLocaleTimeString('es-ES', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    fractionalSecondDigits: 3
+                });
+                
+                ctx.fillText(timeStr, x, height - padding + 15);
+            }
+        }
+        
+        // Dibujar gráfico cuando se carga la página
+        window.addEventListener('load', drawChart);
+        window.addEventListener('resize', drawChart);
+    </script>
 </body>
 </html>`;
 }
@@ -330,8 +695,23 @@ function saveHtmlReport(htmlContent: string, host: string, port: number): string
     const fs = require('fs');
     const path = require('path');
     
+    // Determinar la ruta correcta del directorio tmp
+    let tmpDir: string;
+    if (__dirname.endsWith('dist')) {
+        tmpDir = path.join(__dirname, '..', 'tmp');
+    } else {
+        tmpDir = path.join(__dirname, 'tmp');
+    }
+    
+    // Crear directorio tmp si no existe
+    if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+    }
+    
+    const filePath = path.join(tmpDir, filename);
+    
     try {
-        fs.writeFileSync(filename, htmlContent, 'utf8');
+        fs.writeFileSync(filePath, htmlContent, 'utf8');
         return filename;
     } catch (error) {
         log(`Error guardando reporte HTML: ${error}`, 'error');
@@ -340,10 +720,14 @@ function saveHtmlReport(htmlContent: string, host: string, port: number): string
 }
 
 // Configuración del cliente TCP/IP
-export function createTcpClient(host: string = '10.245.229.25', port: number = 6020): net.Socket {
+export function createTcpClient(host: string = '10.245.229.25', port: number = 6020): { socket: net.Socket; getRequestData: () => { message: string; details: Record<string, string> }; getResponseData: () => { message: string; details: Record<string, string> } } {
     const client = new net.Socket();
     let connectionTimeout: NodeJS.Timeout;
     let responseTimeout: NodeJS.Timeout;
+    let requestMessage = '';
+    let requestDetails: Record<string, string> = {};
+    let responseMessage = '';
+    let responseDetails: Record<string, string> = {};
 
     // Establecer un timeout para la conexión de 5 segundos
     connectionTimeout = setTimeout(() => {
@@ -363,8 +747,15 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
         const serializedMessage = serializeIso8583Message(isoMessage);
         log('Enviando mensaje ISO 8583: ' + serializedMessage, 'debug');
 
+        // Guardar el request para el reporte
+        requestMessage = serializedMessage;
+        // Parsear el mensaje original sin el header de longitud
+        requestDetails = deserializeIso8583Message(serializedMessage);
+
         // Enviar mensaje
-        client.write(serializedMessage);
+        // Todo el mensaje debe ser ASCII, no hexadecimal
+        const messageBuffer = Buffer.from(serializedMessage, 'ascii');
+        client.write(messageBuffer);
 
         // Establecer un timeout para la espera de la respuesta de 5 segundos
         responseTimeout = setTimeout(() => {
@@ -376,11 +767,13 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
     // Manejar datos recibidos del servidor
     client.on('data', (data) => {
         clearTimeout(responseTimeout); // Limpiar el timeout de respuesta
-        const response = data.toString();
+        const response = data.toString('ascii');
         log('Respuesta recibida del servidor: ' + response, 'debug');
 
-        const deserializedResponse = deserializeIso8583Message(response);
-        log('Desglose de los elementos del response: ' + JSON.stringify(deserializedResponse), 'debug');
+        // Guardar el response para el reporte
+        responseMessage = response;
+        responseDetails = deserializeIso8583Message(response);
+        log('Desglose de los elementos del response: ' + JSON.stringify(responseDetails), 'debug');
 
         client.destroy(); // Cerrar conexión después de recibir la respuesta
     });
@@ -406,154 +799,180 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
         client.destroy();
     });
 
-    return client;
+    return {
+        socket: client,
+        getRequestData: () => ({ message: requestMessage, details: requestDetails }),
+        getResponseData: () => ({ message: responseMessage, details: responseDetails })
+    };
 }
 
 // Si el archivo se ejecuta directamente, crear y conectar el cliente
 if (require.main === module) {
-    // Función para mostrar ayuda
     function showHelp() {
-        console.log('Uso: ts-node tcp-client.ts [opciones]');
-        console.log('');
-        console.log('Opciones:');
-        console.log('  --ip <dirección>     Dirección IP del servidor (default: 10.245.229.25)');
-        console.log('  --pt <puerto>        Puerto del servidor (default: 6020)');
-        console.log('  --it <iteraciones>   Número de iteraciones (default: 1)');
-        console.log('  --dl <milisegundos>  Pausa entre iteraciones en milisegundos (default: 1000)');
-        console.log('  --hl                 Mostrar esta ayuda');
-        console.log('');
-        console.log('Ejemplos:');
-        console.log('  ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 5');
-        console.log('  ts-node tcp-client.ts --ip 10.245.229.25 --pt 6020 --it 10 --dl 2000');
-        console.log('  ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 3 --dl 500');
+        console.log(`
+🚀 EchoTest - Cliente TCP/IP para Pruebas ISO 8583
+
+Uso: ts-node tcp-client.ts [opciones]
+
+Opciones:
+  --ip <ip>           Dirección IP del servidor (default: 10.245.229.25)
+  --pt <puerto>       Puerto del servidor (default: 6020)
+  --it <iteraciones>  Número de iteraciones (default: 1)
+  --dl <delay>        Delay entre iteraciones en ms (default: 0)
+  --th <hilos>        Número de hilos para paralelización (default: 1)
+  --help              Mostrar esta ayuda
+
+Ejemplos:
+  ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 100 --dl 50
+  ts-node tcp-client.ts --ip 192.168.1.100 --pt 8080 --it 500 --dl 0 --th 10
+  ts-node tcp-client.ts --help
+        `);
     }
 
-    // Función para procesar argumentos
-    function parseArguments(args: string[]): { host: string; port: number; iterations: number; delay: number } {
+    function parseArguments(args: string[]): { host: string; port: number; iterations: number; delay: number; threads: number } {
         let host = '10.245.229.25';
         let port = 6020;
         let iterations = 1;
-        let delay = 1000; // Default: 1000 milisegundos = 1 segundo
+        let delay = 0;
+        let threads = 1;
 
         for (let i = 0; i < args.length; i++) {
-            const arg = args[i];
-            
-            switch (arg) {
+            switch (args[i]) {
                 case '--ip':
-                    if (i + 1 < args.length) {
-                        host = args[i + 1];
-                        i++; // Saltar el siguiente argumento
-                    } else {
-                        console.error('Error: --ip requiere una dirección IP');
-                        process.exit(1);
-                    }
+                    host = args[++i] || host;
                     break;
-                    
                 case '--pt':
-                    if (i + 1 < args.length) {
-                        const portArg = parseInt(args[i + 1], 10);
-                        if (isNaN(portArg) || portArg < 1 || portArg > 65535) {
-                            console.error('Error: --pt requiere un puerto válido (1-65535)');
-                            process.exit(1);
-                        }
-                        port = portArg;
-                        i++; // Saltar el siguiente argumento
-                    } else {
-                        console.error('Error: --pt requiere un puerto');
-                        process.exit(1);
-                    }
+                    port = parseInt(args[++i]) || port;
                     break;
-                    
                 case '--it':
-                    if (i + 1 < args.length) {
-                        const iterArg = parseInt(args[i + 1], 10);
-                        if (isNaN(iterArg) || iterArg < 1) {
-                            console.error('Error: --it requiere un número de iteraciones válido (>= 1)');
-                            process.exit(1);
-                        }
-                        iterations = iterArg;
-                        i++; // Saltar el siguiente argumento
-                    } else {
-                        console.error('Error: --it requiere un número de iteraciones');
-                        process.exit(1);
-                    }
+                    iterations = parseInt(args[++i]) || iterations;
                     break;
-                    
                 case '--dl':
-                    if (i + 1 < args.length) {
-                        const delayArg = parseInt(args[i + 1], 10);
-                        if (isNaN(delayArg) || delayArg < 0) {
-                            console.error('Error: --dl requiere un tiempo de pausa válido en milisegundos (>= 0)');
-                            process.exit(1);
-                        }
-                        delay = delayArg;
-                        i++; // Saltar el siguiente argumento
-                    } else {
-                        console.error('Error: --dl requiere un tiempo de pausa en milisegundos');
-                        process.exit(1);
-                    }
+                    delay = parseInt(args[++i]) || delay;
                     break;
-                    
-                case '--hl':
+                case '--th':
+                    threads = parseInt(args[++i]) || threads;
+                    break;
+                case '--help':
                     showHelp();
                     process.exit(0);
-                    break;
-                    
-                default:
-                    if (arg.startsWith('--')) {
-                        console.error(`Error: Opción desconocida: ${arg}`);
-                        console.error('Usa --hl para ver las opciones disponibles');
-                        process.exit(1);
-                    }
                     break;
             }
         }
 
-        return { host, port, iterations, delay };
+        return { host, port, iterations, delay, threads };
     }
 
     // Función para ejecutar una iteración
-    function runIteration(host: string, port: number, iterationNumber: number, delay: number): Promise<void> {
+    function runIteration(host: string, port: number, iterationNumber: number, delay: number, threadId: number): Promise<ResponseMetrics> {
         return new Promise((resolve, reject) => {
-            log(`Ejecutando iteración ${iterationNumber}`, 'info');
+            log(`Ejecutando iteración ${iterationNumber} en hilo ${threadId}`, 'info');
+            
+            const startTime = Date.now();
+            const timestamp = new Date().toISOString();
             
             const client = createTcpClient(host, port);
             let isResolved = false;
+            let requestMessage = '';
+            let requestDetails: Record<string, string> = {};
+            let responseMessage = '';
+            let responseDetails: Record<string, string> = {};
             
             // Función para resolver la promesa de forma segura
-            const safeResolve = () => {
+            const safeResolve = (success: boolean, error?: string) => {
                 if (!isResolved) {
                     isResolved = true;
-                    log(`Iteración ${iterationNumber} completada`, 'info');
-                    resolve();
+                    const endTime = Date.now();
+                    const responseTime = endTime - startTime;
+                    
+                    const metrics: ResponseMetrics = {
+                        iteration: iterationNumber,
+                        threadId: threadId,
+                        startTime: startTime,
+                        endTime: endTime,
+                        responseTime: responseTime,
+                        success: success,
+                        error: error,
+                        timestamp: timestamp,
+                        requestMessage: requestMessage,
+                        requestDetails: requestDetails,
+                        responseMessage: responseMessage,
+                        responseDetails: responseDetails
+                    };
+                    
+                    log(`Iteración ${iterationNumber} en hilo ${threadId} completada`, 'info');
+                    resolve(metrics);
                 }
             };
             
             const safeReject = (error: Error) => {
                 if (!isResolved) {
                     isResolved = true;
-                    log(`Error en iteración ${iterationNumber}: ${error.message}`, 'error');
-                    reject(error);
+                    const endTime = Date.now();
+                    const responseTime = endTime - startTime;
+                    
+                    const metrics: ResponseMetrics = {
+                        iteration: iterationNumber,
+                        threadId: threadId,
+                        startTime: startTime,
+                        endTime: endTime,
+                        responseTime: responseTime,
+                        success: false,
+                        error: error.message,
+                        timestamp: timestamp,
+                        requestMessage: requestMessage,
+                        requestDetails: requestDetails,
+                        responseMessage: responseMessage,
+                        responseDetails: responseDetails
+                    };
+                    
+                    log(`Error en iteración ${iterationNumber} en hilo ${threadId}: ${error.message}`, 'error');
+                    resolve(metrics);
                 }
             };
-            
-            // Manejar el cierre de conexión para resolver la promesa
-            client.on('close', () => {
-                safeResolve();
+
+            client.socket.on('connect', () => {
+                log(`Conectado al servidor en iteración ${iterationNumber} (hilo ${threadId})`, 'info');
             });
-            
-            client.on('error', (err) => {
-                safeReject(err);
+
+            client.socket.on('data', (data) => {
+                const response = data.toString('ascii');
+                log(`Respuesta recibida en iteración ${iterationNumber} (hilo ${threadId}): ${response}`, 'debug');
+                
+                // Obtener los datos del request y response del cliente
+                const requestData = client.getRequestData();
+                const responseData = client.getResponseData();
+                
+                // Actualizar las variables locales con los datos del cliente
+                requestMessage = requestData.message;
+                requestDetails = requestData.details;
+                responseMessage = responseData.message;
+                responseDetails = responseData.details;
+                
+                safeResolve(true);
             });
-            
-            // El timeout de 10 segundos ya está manejado en createTcpClient
-            // No necesitamos un timeout adicional aquí
+
+            client.socket.on('error', (error) => {
+                log(`Error de conexión en iteración ${iterationNumber} (hilo ${threadId}): ${error.message}`, 'error');
+                safeReject(error);
+            });
+
+            client.socket.on('close', () => {
+                if (!isResolved) {
+                    safeResolve(true);
+                }
+            });
+
+            client.socket.on('timeout', () => {
+                log(`Timeout en iteración ${iterationNumber} (hilo ${threadId})`, 'error');
+                safeReject(new Error('Timeout de conexión'));
+            });
         });
     }
 
-    // Función principal para ejecutar múltiples iteraciones
-    async function runMultipleIterations(host: string, port: number, iterations: number, delay: number) {
-        log(`Iniciando ${iterations} iteración(es) hacia ${host}:${port}`, 'info');
+    // Función para ejecutar múltiples iteraciones en paralelo
+    async function runMultipleIterations(host: string, port: number, iterations: number, delay: number, threads: number) {
+        log(`Iniciando ${iterations} iteración(es) hacia ${host}:${port} con ${threads} hilos`, 'info');
         
         const metrics: ResponseMetrics[] = [];
         let isRunning = true;
@@ -568,72 +987,110 @@ if (require.main === module) {
         process.on('SIGTERM', cleanup);
         
         try {
-            for (let i = 1; i <= iterations && isRunning; i++) {
-                const startTime = Date.now();
-                try {
-                    await runIteration(host, port, i, delay);
-                    const endTime = Date.now();
-                    const responseTime = endTime - startTime;
-                    metrics.push({
-                        iteration: i,
-                        startTime,
-                        endTime,
-                        responseTime,
-                        success: true,
-                    });
-                    
-                    // Pausa entre iteraciones (excepto la última)
-                    if (i < iterations && isRunning) {
-                        log(`Esperando ${delay} milisegundos antes de la siguiente iteración...`, 'debug');
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    }
-                } catch (error) {
-                    const endTime = Date.now();
-                    const responseTime = endTime - startTime;
-                    metrics.push({
-                        iteration: i,
-                        startTime,
-                        endTime,
-                        responseTime,
-                        success: false,
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                    log(`Error en iteración ${i}: ${error}`, 'error');
-                    // Continuar con la siguiente iteración
+            // Dividir las iteraciones entre los hilos
+            const iterationsPerThread = Math.ceil(iterations / threads);
+            const promises: Promise<ResponseMetrics[]>[] = [];
+            
+            for (let threadId = 0; threadId < threads && isRunning; threadId++) {
+                const startIteration = threadId * iterationsPerThread + 1;
+                const endIteration = Math.min((threadId + 1) * iterationsPerThread, iterations);
+                
+                if (startIteration <= iterations) {
+                    const threadPromise = runThread(host, port, startIteration, endIteration, delay, threadId + 1);
+                    promises.push(threadPromise);
                 }
             }
             
+            // Esperar a que todos los hilos completen
+            const threadResults = await Promise.all(promises);
+            
+            // Combinar todas las métricas
+            threadResults.forEach(threadMetrics => {
+                metrics.push(...threadMetrics);
+            });
+            
+            // Ordenar métricas por iteración
+            metrics.sort((a, b) => a.iteration - b.iteration);
+            
             log(`Todas las ${iterations} iteración(es) completadas`, 'info');
             
-            const htmlReport = generateHtmlReport(metrics, host, port, iterations, delay);
+            const htmlReport = generateHtmlReport(metrics, host, port, iterations, delay, threads);
             const reportFilename = saveHtmlReport(htmlReport, host, port);
             
-            if (reportFilename) {
-                log(`Reporte HTML guardado en: ${reportFilename}`, 'info');
-                // Abrir el reporte en el navegador
-                setTimeout(() => {
-                    try {
-                        require('child_process').exec(`open "${reportFilename}"`);
-                    } catch (error) {
-                        log('No se pudo abrir el reporte automáticamente', 'debug');
-                    }
-                }, 1000);
+            const path = require('path');
+            
+            // Determinar la ruta correcta del directorio tmp
+            let tmpDir: string;
+            if (__dirname.endsWith('dist')) {
+                tmpDir = path.join(__dirname, '..', 'tmp');
             } else {
-                log('No se pudo guardar el reporte HTML', 'error');
+                tmpDir = path.join(__dirname, 'tmp');
             }
-        } finally {
-            // Limpiar listeners
-            process.removeAllListeners('SIGINT');
-            process.removeAllListeners('SIGTERM');
+            
+            const reportPath = path.join(tmpDir, reportFilename);
+            
+            log(`Reporte HTML generado: ${reportPath}`, 'info');
+            
+            // Abrir el reporte en el navegador
+            const { exec } = require('child_process');
+            exec(`open "${reportPath}"`, (error: any) => {
+                if (error) {
+                    log(`No se pudo abrir el reporte automáticamente: ${error.message}`, 'error');
+                    log(`Puede abrir manualmente: ${reportPath}`, 'info');
+                }
+            });
+            
+        } catch (error) {
+            log(`Error durante la ejecución: ${error}`, 'error');
         }
     }
 
-    // Procesar argumentos
-    const { host, port, iterations, delay } = parseArguments(process.argv.slice(2));
-    
-    // Ejecutar iteraciones
-    runMultipleIterations(host, port, iterations, delay).catch(error => {
-        log(`Error general: ${error}`, 'error');
-        process.exit(1);
-    });
+    // Función para ejecutar un hilo de iteraciones
+    async function runThread(host: string, port: number, startIteration: number, endIteration: number, delay: number, threadId: number): Promise<ResponseMetrics[]> {
+        const threadMetrics: ResponseMetrics[] = [];
+        
+        for (let i = startIteration; i <= endIteration; i++) {
+            try {
+                const metrics = await runIteration(host, port, i, delay, threadId);
+                threadMetrics.push(metrics);
+                
+                if (delay > 0 && i < endIteration) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            } catch (error) {
+                log(`Error en hilo ${threadId}, iteración ${i}: ${error}`, 'error');
+                const errorMetrics: ResponseMetrics = {
+                    iteration: i,
+                    threadId: threadId,
+                    startTime: Date.now(),
+                    endTime: Date.now(),
+                    responseTime: 0,
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error),
+                    timestamp: new Date().toISOString()
+                };
+                threadMetrics.push(errorMetrics);
+            }
+        }
+        
+        return threadMetrics;
+    }
+
+    // Función principal
+    async function main() {
+        const args = process.argv.slice(2);
+        const { host, port, iterations, delay, threads } = parseArguments(args);
+        
+        log(`Configuración: ${host}:${port}, ${iterations} iteraciones, ${delay}ms delay, ${threads} hilos`, 'info');
+        
+        await runMultipleIterations(host, port, iterations, delay, threads);
+    }
+
+    // Ejecutar si es el archivo principal
+    if (require.main === module) {
+        main().catch(error => {
+            log(`Error en la ejecución principal: ${error}`, 'error');
+            process.exit(1);
+        });
+    }
 }
