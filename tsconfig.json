@@ -1,12 +1,18 @@
 {
   "compilerOptions": {
-    "target": "ES2019",
+    "target": "ES2018",
     "module": "CommonJS",
+    "lib": ["ES2018"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "outDir": "./dist"
+    "outDir": "./dist",
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": false
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "dist", "tmp", "log"]
 }

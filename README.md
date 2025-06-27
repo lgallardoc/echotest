@@ -12,6 +12,7 @@
 - **🔍 Agrupamiento por Conexiones:** Análisis detallado por conexión permanente
 - **⚠️ Validaciones Inteligentes:** Advertencias y recomendaciones de configuración
 - **📝 Logging Completo:** Logs detallados con diferentes niveles de verbosidad
+- **🔧 Compatibilidad:** Compatible con Node.js 14+ y versiones superiores
 
 ## 🏗️ Arquitectura
 
@@ -35,9 +36,113 @@
 
 ### Prerrequisitos
 
-- Node.js 16+
+- **Node.js 14+** (recomendado: Node.js 16+ para mejor rendimiento)
 - npm o pnpm
 - Servidor TCP/IP para pruebas
+
+### Verificación de Compatibilidad
+
+```bash
+# Verificar versión de Node.js
+node --version
+
+# Verificar que sea >= 14.0.0
+# El proyecto está configurado para ser compatible con Node.js 14+
+```
+
+### Características Verificadas
+
+✅ **ES2018+ Features:**
+
+- Promise.allSettled
+- BigInt
+- String.prototype.padStart
+- Array.prototype.flat
+- Object.entries
+
+✅ **Node.js Built-in Modules:**
+
+- fs.promises
+- util.promisify
+- Buffer.from
+- process.env
+
+✅ **JavaScript Moderno:**
+
+- async/await
+- Template literals
+- Arrow functions
+- Classes
+- Destructuring
+- Spread operator
+
+### Configuración de TypeScript
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2018",
+    "module": "CommonJS",
+    "lib": ["ES2018"]
+  }
+}
+```
+
+### Dependencias Compatibles
+
+- **@types/node:** ^14.18.0
+- **typescript:** ^4.9.0
+- **winston:** ^3.8.2
+- **dotenv:** ^16.0.3
+
+## 📝 Changelog
+
+### v1.1.0 - Conexiones Permanentes
+
+- ✅ Agregar parámetro `--cn` para conexiones permanentes
+- ✅ Implementar pool de conexiones persistentes
+- ✅ Agregar información de red en reportes
+- ✅ Agrupar detalles por conexión
+- ✅ Validaciones de configuración
+- ✅ Mejorar documentación
+
+### v1.0.0 - Versión Inicial
+
+- ✅ Cliente TCP multi-hilo
+- ✅ Servidor TCP multi-hilo
+- ✅ Generación de mensajes ISO 8583
+- ✅ Reportes HTML con gráficos
+- ✅ Sistema de logging
+
+## 🤝 Contribuciones
+
+Las contribuciones son bienvenidas! Por favor:
+
+1. Fork el proyecto
+2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
+3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
+4. Push a la rama (`git push origin feature/AmazingFeature`)
+5. Abre un Pull Request
+
+## 📄 Licencia
+
+Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
+
+## 👨‍💻 Autor
+
+**Luis Gallardo** - [lgallardoc](https://github.com/lgallardoc)
+
+## 🙏 Agradecimientos
+
+- **iso8583-js:** Librería para manejo de mensajes ISO 8583
+- **Node.js:** Plataforma de ejecución
+- **TypeScript:** Lenguaje de programación
+
+---
+
+⭐ **Si este proyecto te es útil, por favor dale una estrella en GitHub!**
+
+## 🚀 Instalación
 
 ### Instalación Rápida
 
@@ -334,49 +439,21 @@ CONNECTION_TIMEOUT=30000
 chmod +w tmp/ log/
 ```
 
-## 📝 Changelog
+## 🔧 Compatibilidad
 
-### v1.1.0 - Conexiones Permanentes
+### Versiones de Node.js Soportadas
 
-- ✅ Agregar parámetro `--cn` para conexiones permanentes
-- ✅ Implementar pool de conexiones persistentes
-- ✅ Agregar información de red en reportes
-- ✅ Agrupar detalles por conexión
-- ✅ Validaciones de configuración
-- ✅ Mejorar documentación
+EchoTest es compatible con **Node.js 14+** y versiones superiores. Se han realizado las siguientes configuraciones para garantizar la compatibilidad:
 
-### v1.0.0 - Versión Inicial
+- **TypeScript Target:** ES2018 (compatible con Node.js 14+)
+- **Dependencias:** Versiones compatibles con Node.js 14+
+- **Características:** Uso de ES2018+ features soportadas
 
-- ✅ Cliente TCP multi-hilo
-- ✅ Servidor TCP multi-hilo
-- ✅ Generación de mensajes ISO 8583
-- ✅ Reportes HTML con gráficos
-- ✅ Sistema de logging
+### Verificación de Compatibilidad
 
-## 🤝 Contribuciones
+```bash
+# Verificar versión de Node.js
+node --version
 
-Las contribuciones son bienvenidas! Por favor:
-
-1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
-
-## 📄 Licencia
-
-Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
-
-## 👨‍💻 Autor
-
-**Luis Gallardo** - [lgallardoc](https://github.com/lgallardoc)
-
-## 🙏 Agradecimientos
-
-- **iso8583-js:** Librería para manejo de mensajes ISO 8583
-- **Node.js:** Plataforma de ejecución
-- **TypeScript:** Lenguaje de programación
-
----
-
-⭐ **Si este proyecto te es útil, por favor dale una estrella en GitHub!**
+# Verificar que sea >= 14.0.0
+```
