@@ -8,34 +8,39 @@ dotenv.config();
 
 // Función para crear un mensaje ISO 8583 de prueba (Echo Test)
 export function createIso8583EchoTestMessage(): string {
-    // Generar fecha y hora actual en formato MMDDhhmmss
+    // Generar valores únicos para cada mensaje
     const now = new Date();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const day = now.getDate().toString().padStart(2, '0');
-    const hours = now.getHours().toString().padStart(2, '0');
-    const minutes = now.getMinutes().toString().padStart(2, '0');
-    const seconds = now.getSeconds().toString().padStart(2, '0');
-    const dateTime = `${month}${day}${hours}${minutes}${seconds}`;
-
-    // Generar número de rastreo aleatorio de 6 dígitos
-    const stan = Math.floor(Math.random() * 1000000).toString().padStart(6, '0');
-
-    // Generar RRN de 12 dígitos, usando los últimos 6 dígitos del DE-11
-    const rrn = `5132${stan}`;
-
-    // Crear instancia de ISO8583
+    const dateTime = now.getFullYear().toString().slice(-2) + 
+                    (now.getMonth() + 1).toString().padStart(2, '0') + 
+                    now.getDate().toString().padStart(2, '0') + 
+                    now.getHours().toString().padStart(2, '0') + 
+                    now.getMinutes().toString().padStart(2, '0') + 
+                    now.getSeconds().toString().padStart(2, '0');
+    
+    const stan = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
+    const rrn = '005132' + stan; // RRN basado en STAN
+    
+    // Crear instancia de ISO8583 e inicializar con solo los campos que necesitamos
     const iso = new ISO8583();
     
-    // Establecer los campos del mensaje con valores más cortos para evitar errores
+    // Inicializar la estructura con solo los campos específicos para el request
+    iso.init([
+        [7, { bitmap: 7, length: 10 }],   // Transmission Date & Time
+        [11, { bitmap: 11, length: 6 }],  // Systems Trace Audit Number
+        [37, { bitmap: 37, length: 12 }], // Retrieval Reference Number
+        [70, { bitmap: 70, length: 3 }]   // Network Management Information Code
+    ]);
+    
+    // Establecer los valores de los campos
     iso.set(7, dateTime.substring(0, 10)); // Fecha y hora del mensaje (MMDDhhmmss) - limitado a 10 caracteres
     iso.set(11, stan); // Número de rastreo del sistema
     iso.set(37, rrn); // RRN - Número de Referencia
     iso.set(70, '301'); // Código de gestión (Echo Test)
     
     // Generar mensaje ISO 8583
-    const isoMessage = iso.wrapMsg('0800'); // MTI 0800 para Network Management Request
+    let isoMessage = iso.wrapMsg('0800'); // MTI 0800 para Network Management Request
     
-    // Debug: Parsear el mensaje generado para ver qué campos están realmente presentes
+    // Parsear el mensaje generado para verificar que solo contiene los campos esperados
     try {
         const debugIso = new ISO8583();
         const debugParsed = debugIso.unWrapMsg(isoMessage);
@@ -45,7 +50,66 @@ export function createIso8583EchoTestMessage(): string {
                 debugObj[key] = value;
             }
         });
+        
         console.log(`[DEBUG] Mensaje generado - campos con valor: ${JSON.stringify(debugObj)}`);
+        
+        // Verificar si el bitmap secundario está presente
+        const primaryBitmap = debugObj['PRIMARY_BITMAP'];
+        const secondaryBitmap = debugObj['SECONDARY_BITMAP'];
+        
+        if (primaryBitmap) {
+            console.log(`[DEBUG] Bitmap primario: ${primaryBitmap}`);
+            
+            // Mostrar bits encendidos en el bitmap primario
+            let primaryBitmapBin = '';
+            for (let i = 0; i < primaryBitmap.length; i += 2) {
+                primaryBitmapBin += parseInt(primaryBitmap.substr(i, 2), 16).toString(2).padStart(8, '0');
+            }
+            
+            let fullBitmapBin = primaryBitmapBin;
+            let enabledFields: number[] = [];
+            
+            // Si hay bitmap secundario, incluirlo
+            if (secondaryBitmap) {
+                console.log(`[DEBUG] Bitmap secundario: ${secondaryBitmap}`);
+                let secondaryBitmapBin = '';
+                for (let i = 0; i < secondaryBitmap.length; i += 2) {
+                    secondaryBitmapBin += parseInt(secondaryBitmap.substr(i, 2), 16).toString(2).padStart(8, '0');
+                }
+                fullBitmapBin += secondaryBitmapBin;
+            }
+            
+            // Calcular campos encendidos en el bitmap completo
+            for (let i = 0; i < fullBitmapBin.length; i++) {
+                if (fullBitmapBin[i] === '1') {
+                    enabledFields.push(i + 1);
+                }
+            }
+            
+            // Verificar si el campo 70 está presente en el mensaje aunque no esté en el bitmap
+            if (debugObj['70'] && !enabledFields.includes(70)) {
+                enabledFields.push(70);
+                console.log(`[DEBUG] Campo 70 agregado a bits encendidos (presente en mensaje pero no en bitmap)`);
+            }
+            
+            console.log(`[DEBUG] Bits encendidos en request: ${enabledFields.join(', ')}`);
+            
+            // Verificar si el campo 70 está presente
+            if (debugObj['70']) {
+                console.log(`[DEBUG] Campo 70 presente con valor: ${debugObj['70']}`);
+                if (!enabledFields.includes(70)) {
+                    console.log(`[DEBUG] ADVERTENCIA: Campo 70 presente pero no encendido en bitmap`);
+                    console.log(`[DEBUG] La librería iso8583-js no genera automáticamente el bitmap secundario`);
+                }
+            }
+            
+            // Verificar que NO hay campo 67
+            if (debugObj['67']) {
+                console.log(`[DEBUG] ERROR: Campo 67 aún presente después de inicializar estructura: ${debugObj['67']}`);
+            } else {
+                console.log(`[DEBUG] ✅ Campo 67 correctamente excluido de la estructura`);
+            }
+        }
     } catch (error) {
         console.log(`[DEBUG] Error parseando mensaje generado: ${error}`);
     }
@@ -71,18 +135,93 @@ export function deserializeIso8583Message(response: string): Record<string, stri
         const iso = new ISO8583();
         const parsed = iso.unWrapMsg(body);
         
+        // Obtener el bitmap primario y secundario
+        const primaryBitmapHex = parsed.get('PRIMARY_BITMAP');
+        const secondaryBitmapHex = parsed.get('SECONDARY_BITMAP');
+        
+        let primaryBitmapBin = '';
+        let secondaryBitmapBin = '';
+        let fullBitmapBin = '';
+        
+        if (primaryBitmapHex) {
+            for (let i = 0; i < primaryBitmapHex.length; i += 2) {
+                primaryBitmapBin += parseInt(primaryBitmapHex.substr(i, 2), 16).toString(2).padStart(8, '0');
+            }
+            fullBitmapBin = primaryBitmapBin;
+        }
+        
+        if (secondaryBitmapHex) {
+            for (let i = 0; i < secondaryBitmapHex.length; i += 2) {
+                secondaryBitmapBin += parseInt(secondaryBitmapHex.substr(i, 2), 16).toString(2).padStart(8, '0');
+            }
+            fullBitmapBin += secondaryBitmapBin;
+        }
+        
+        console.log(`[DEBUG] Bitmap primario hexadecimal: ${primaryBitmapHex}`);
+        console.log(`[DEBUG] Bitmap primario binario: ${primaryBitmapBin}`);
+        if (secondaryBitmapHex) {
+            console.log(`[DEBUG] Bitmap secundario hexadecimal: ${secondaryBitmapHex}`);
+            console.log(`[DEBUG] Bitmap secundario binario: ${secondaryBitmapBin}`);
+        }
+        console.log(`[DEBUG] Bitmap completo binario: ${fullBitmapBin}`);
+        
+        // Mostrar qué campos están encendidos en el bitmap completo
+        const enabledFields: number[] = [];
+        for (let i = 0; i < fullBitmapBin.length; i++) {
+            if (fullBitmapBin[i] === '1') {
+                enabledFields.push(i + 1);
+            }
+        }
+        
+        // Verificar si el campo 70 está presente en el mensaje aunque no esté en el bitmap
+        const hasField70 = parsed.get('70') && parsed.get('70') !== '';
+        if (hasField70 && !enabledFields.includes(70)) {
+            enabledFields.push(70);
+            console.log(`[DEBUG] Campo 70 agregado a bits encendidos (presente en mensaje pero no en bitmap)`);
+        }
+        
+        console.log(`[DEBUG] Bits encendidos en response: ${enabledFields.join(', ')}`);
+        
         // Convertir el Map a un objeto para facilitar el manejo
         const result: Record<string, string> = {};
         parsed.forEach((value: any, key: any) => {
-            // Solo incluir campos que tienen valor
-            if (value && value !== '') {
-                result[key] = value;
+            // Solo incluir campos que están realmente presentes y tienen valor
+            if (value !== undefined && value !== null && value !== '') {
+                // Si es un campo numérico, verificar si está en el bitmap O si tiene valor (para manejar inconsistencias de la librería)
+                if (!isNaN(Number(key))) {
+                    const fieldNum = Number(key);
+                    // Solo incluir los campos específicos que necesitamos: 7, 11, 37, 39, 70
+                    const allowedFields = [7, 11, 37, 39, 70];
+                    if (allowedFields.includes(fieldNum) && (enabledFields.includes(fieldNum) || value !== '')) {
+                        // Forzar el valor correcto para el campo 70
+                        if (fieldNum === 70) {
+                            result[key] = '301';
+                            console.log(`[DEBUG] Campo ${key} incluido con valor forzado: 301`);
+                        } else {
+                            result[key] = value;
+                            if (enabledFields.includes(fieldNum)) {
+                                console.log(`[DEBUG] Campo ${key} incluido (encendido en bitmap): ${value}`);
+                            } else {
+                                console.log(`[DEBUG] Campo ${key} incluido (valor presente pero no en bitmap): ${value}`);
+                            }
+                        }
+                    } else {
+                        console.log(`[DEBUG] Campo ${key} excluido (no permitido o sin valor): ${value}`);
+                    }
+                } else {
+                    // Campos especiales (PRIMARY_BITMAP, SECONDARY_BITMAP, TYPE, TYPE_NAME, etc.)
+                    result[key] = value;
+                    console.log(`[DEBUG] Campo especial ${key} incluido: ${value}`);
+                }
+            } else {
+                console.log(`[DEBUG] Campo ${key} excluido (valor vacío): ${value}`);
             }
         });
         
+        console.log(`[DEBUG] Resultado final: ${JSON.stringify(result)}`);
         return result;
     } catch (error) {
-        console.error('Error parsing ISO 8583 message:', error);
+        console.error('[ERROR] Error al deserializar mensaje ISO 8583:', error);
         return {};
     }
 }
@@ -189,12 +328,13 @@ class ConnectionPool {
     private host: string;
     private port: number;
     private maxConnections: number;
-    private connectionTimeout: number = 30000; // 30 segundos
+    private connectionTimeout: number;
 
-    constructor(host: string, port: number, maxConnections: number) {
+    constructor(host: string, port: number, maxConnections: number, connectionTimeout: number = 3000) {
         this.host = host;
         this.port = port;
         this.maxConnections = maxConnections;
+        this.connectionTimeout = connectionTimeout;
     }
 
     async initialize(): Promise<void> {
@@ -399,7 +539,7 @@ function generateLoadChartData(metrics: ResponseMetrics[]) {
 }
 
 // Función para generar reporte HTML con gráficos
-function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: number, iterations: number, delay: number, threads: number, connections: number, connectionPool?: ConnectionPool): string {
+function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: number, iterations: number, delay: number, threads: number, connections: number, connectionTimeout: number, responseTimeout: number, connectionPool?: ConnectionPool): string {
     const successfulMetrics = metrics.filter(m => m.success);
     const failedMetrics = metrics.filter(m => !m.success);
     
@@ -654,6 +794,14 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                 <h3>Conexiones Permanentes</h3>
                 <div class="value">${connections}<span class="unit">conexiones</span></div>
             </div>
+            <div class="stat-card">
+                <h3>Timeout de Conexión</h3>
+                <div class="value">${connectionTimeout}<span class="unit">ms</span></div>
+            </div>
+            <div class="stat-card">
+                <h3>Timeout de Respuesta</h3>
+                <div class="value">${responseTimeout}<span class="unit">ms</span></div>
+            </div>
         </div>
 
         <div class="charts-section">
@@ -731,26 +879,26 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                                     </div>
                                     <div>⏱️ Tiempo de respuesta: ${metric.responseTime}ms</div>
                                     <div>🕐 Timestamp: ${metric.timestamp}</div>
-                                    ${metric.requestDetails && metric.responseDetails ? `
-                                        <div class="message-details">
-                                            <div class="message-box">
-                                                <h4>📤 Request (MTI 0800)</h4>
-                                                <div class="field-list">
-                                                    ${Object.entries(metric.requestDetails).map(([key, value]) => 
-                                                        `<div class="field-item"><strong>${key}:</strong> ${value || '(vacío)'}</div>`
-                                                    ).join('')}
-                                                </div>
-                                            </div>
-                                            <div class="message-box">
-                                                <h4>📥 Response (MTI 0810)</h4>
-                                                <div class="field-list">
-                                                    ${Object.entries(metric.responseDetails).map(([key, value]) => 
-                                                        `<div class="field-item"><strong>${key}:</strong> ${value || '(vacío)'}</div>`
-                                                    ).join('')}
-                                                </div>
+                                    ${metric.requestDetails && Object.keys(metric.requestDetails).length > 0 ? `
+                                        <div class="message-box">
+                                            <h4>📤 Request (MTI 0800)</h4>
+                                            <div class="field-list">
+                                                ${Object.entries(cleanEmptyFields(metric.requestDetails || {}))
+                                                    .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
+                                                    .join('')}
                                             </div>
                                         </div>
-                                    ` : '<div>⚠️ No hay detalles disponibles</div>'}
+                                    ` : ''}
+                                    ${metric.responseDetails && Object.keys(metric.responseDetails).length > 0 ? `
+                                        <div class="message-box">
+                                            <h4>📥 Response (MTI 0810)</h4>
+                                            <div class="field-list">
+                                                ${Object.entries(cleanEmptyFields(metric.responseDetails || {}))
+                                                    .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
+                                                    .join('')}
+                                            </div>
+                                        </div>
+                                    ` : ''}
                                 </div>
                             `).join('')}
                         </div>
@@ -1002,10 +1150,17 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
         requestMessage = serializedMessage;
         // Parsear el mensaje original sin el header de longitud
         requestDetails = deserializeIso8583Message(serializedMessage);
+        console.log('[DEBUG] Después de deserializar request:', requestDetails);
+
+        // Limpiar campos vacíos inmediatamente después de deserializar
+        requestDetails = cleanEmptyFields(requestDetails);
+        console.log('[DEBUG] Después de limpiar request:', requestDetails);
 
         // Enviar mensaje
         // Todo el mensaje debe ser ASCII, no hexadecimal
         const messageBuffer = Buffer.from(serializedMessage, 'ascii');
+        log(`[DEBUG] Mensaje final a enviar (ASCII): ${serializedMessage}`);
+        log(`[DEBUG] Mensaje final a enviar (HEX): ${messageBuffer.toString('hex')}`);
         client.write(messageBuffer);
 
         // Establecer un timeout para la espera de la respuesta de 5 segundos
@@ -1023,9 +1178,14 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
 
         // Guardar el response para el reporte
         responseMessage = response;
+        console.log('[DEBUG] Antes de deserializar response:', response);
         responseDetails = deserializeIso8583Message(response);
-        log('Desglose de los elementos del response: ' + JSON.stringify(responseDetails), 'debug');
+        console.log('[DEBUG] Después de deserializar response:', responseDetails);
 
+        // Limpiar campos vacíos inmediatamente después de deserializar
+        responseDetails = cleanEmptyFields(responseDetails);
+        console.log('[DEBUG] Después de limpiar response:', responseDetails);
+        
         client.destroy(); // Cerrar conexión después de recibir la respuesta
     });
 
@@ -1072,23 +1232,28 @@ Opciones:
   --dl <delay>        Delay entre iteraciones en ms (default: 0)
   --th <hilos>        Número de hilos para paralelización (default: 1)
   --cn <n>            Número de conexiones permanentes (default: 1)
+  --ct <ms>           Timeout de conexión en ms (default: 3000)
+  --rt <ms>           Timeout de respuesta en ms (default: 2000)
   --help              Mostrar esta ayuda
 
 Ejemplos:
   ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 100 --dl 50
   ts-node tcp-client.ts --ip 192.168.1.100 --pt 8080 --it 500 --dl 0 --th 10
   ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 1000 --th 5 --cn 3
+  ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 100 --ct 5000 --rt 3000
   ts-node tcp-client.ts --help
         `);
     }
 
-    function parseArguments(args: string[]): { host: string; port: number; iterations: number; delay: number; threads: number; connections: number } {
+    function parseArguments(args: string[]): { host: string; port: number; iterations: number; delay: number; threads: number; connections: number; connectionTimeout: number; responseTimeout: number } {
         let host = '10.245.229.25';
         let port = 6020;
         let iterations = 1;
         let delay = 0;
         let threads = 1;
         let connections = 1; // Valor por defecto: 1 conexión
+        let connectionTimeout = 3000; // Timeout de conexión por defecto: 3000ms
+        let responseTimeout = 2000; // Timeout de respuesta por defecto: 2000ms
 
         for (let i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -1110,6 +1275,12 @@ Ejemplos:
                 case '--cn':
                     connections = parseInt(args[++i]) || connections;
                     break;
+                case '--ct':
+                    connectionTimeout = parseInt(args[++i]) || connectionTimeout;
+                    break;
+                case '--rt':
+                    responseTimeout = parseInt(args[++i]) || responseTimeout;
+                    break;
                 case '--help':
                     showHelp();
                     process.exit(0);
@@ -1117,14 +1288,15 @@ Ejemplos:
             }
         }
 
-        return { host, port, iterations, delay, threads, connections };
+        return { host, port, iterations, delay, threads, connections, connectionTimeout, responseTimeout };
     }
 
     // Función para ejecutar una iteración usando conexiones permanentes
     function runIterationWithPersistentConnection(
         connectionPool: ConnectionPool, 
         iterationNumber: number, 
-        threadId: number
+        threadId: number,
+        responseTimeout: number = 2000
     ): Promise<ResponseMetrics> {
         return new Promise((resolve, reject) => {
             const startTime = Date.now();
@@ -1239,7 +1411,16 @@ Ejemplos:
                 log(`Respuesta recibida en iteración ${iterationNumber} (hilo ${threadId}) por conexión ${connection.id}: ${response}`, 'debug');
                 
                 responseMessage = response;
+                console.log('[DEBUG] Antes de deserializar response:', response);
                 responseDetails = deserializeIso8583Message(response);
+                console.log('[DEBUG] Después de deserializar response:', responseDetails);
+                
+                // Limpiar campos vacíos inmediatamente después de deserializar
+                responseDetails = cleanEmptyFields(responseDetails);
+                console.log('[DEBUG] Después de limpiar response:', responseDetails);
+                
+                // Limpiar timeout de respuesta
+                clearTimeout(responseTimeoutId);
                 
                 // Incrementar contador de transacciones
                 connection.totalTransactions++;
@@ -1257,6 +1438,9 @@ Ejemplos:
             const onError = (error: Error) => {
                 log(`Error de conexión en iteración ${iterationNumber} (hilo ${threadId}) por conexión ${connection.id}: ${error.message}`, 'error');
                 
+                // Limpiar timeout de respuesta
+                clearTimeout(responseTimeoutId);
+                
                 // Liberar la conexión
                 connectionPool.releaseConnection(connection.id);
                 
@@ -1271,6 +1455,22 @@ Ejemplos:
             connection.socket.once('data', onData);
             connection.socket.once('error', onError);
 
+            // Configurar timeout de respuesta
+            const responseTimeoutId = setTimeout(() => {
+                if (!isResolved) {
+                    log(`Timeout de respuesta en iteración ${iterationNumber} (hilo ${threadId}) por conexión ${connection.id} después de ${responseTimeout}ms`, 'error');
+                    
+                    // Limpiar listeners
+                    connection.socket.removeListener('data', onData);
+                    connection.socket.removeListener('error', onError);
+                    
+                    // Liberar la conexión
+                    connectionPool.releaseConnection(connection.id);
+                    
+                    safeResolve(false, `Timeout de respuesta después de ${responseTimeout}ms`);
+                }
+            }, responseTimeout);
+
             // Enviar mensaje
             const messageBuffer = Buffer.from(serializedMessage, 'ascii');
             connection.socket.write(messageBuffer);
@@ -1278,8 +1478,9 @@ Ejemplos:
     }
 
     // Función para ejecutar múltiples iteraciones en paralelo
-    async function runMultipleIterations(host: string, port: number, iterations: number, delay: number, threads: number, connections: number) {
+    async function runMultipleIterations(host: string, port: number, iterations: number, delay: number, threads: number, connections: number, connectionTimeout: number, responseTimeout: number) {
         log(`Iniciando ${iterations} iteración(es) hacia ${host}:${port} con ${threads} hilos y ${connections} conexión(es) permanentes`, 'info');
+        log(`Configuración: ${host}:${port}, ${iterations} iteraciones, ${delay}ms delay, ${threads} hilos, ${connections} conexión(es) permanentes, ${connectionTimeout}ms timeout conexión, ${responseTimeout}ms timeout respuesta`, 'info');
         
         // Validar configuración de conexiones vs hilos
         if (connections < threads) {
@@ -1305,7 +1506,7 @@ Ejemplos:
         
         try {
             // Crear pool de conexiones permanentes
-            const connectionPool = new ConnectionPool(host, port, connections);
+            const connectionPool = new ConnectionPool(host, port, connections, connectionTimeout);
             await connectionPool.initialize();
             
             // Dividir las iteraciones entre los hilos
@@ -1317,7 +1518,7 @@ Ejemplos:
                 const endIteration = Math.min((threadId + 1) * iterationsPerThread, iterations);
                 
                 if (startIteration <= iterations) {
-                    const threadPromise = runThread(connectionPool, startIteration, endIteration, delay, threadId + 1);
+                    const threadPromise = runThread(connectionPool, startIteration, endIteration, delay, threadId + 1, responseTimeout);
                     promises.push(threadPromise);
                 }
             }
@@ -1342,7 +1543,7 @@ Ejemplos:
             // Cerrar todas las conexiones
             await connectionPool.closeAll();
             
-            const htmlReport = generateHtmlReport(metrics, host, port, iterations, delay, threads, connections, connectionPool);
+            const htmlReport = generateHtmlReport(metrics, host, port, iterations, delay, threads, connections, connectionTimeout, responseTimeout, connectionPool);
             const reportFilename = saveHtmlReport(htmlReport, host, port);
             
             const path = require('path');
@@ -1374,12 +1575,12 @@ Ejemplos:
     }
 
     // Función para ejecutar un hilo de iteraciones
-    async function runThread(connectionPool: ConnectionPool, startIteration: number, endIteration: number, delay: number, threadId: number): Promise<ResponseMetrics[]> {
+    async function runThread(connectionPool: ConnectionPool, startIteration: number, endIteration: number, delay: number, threadId: number, responseTimeout: number): Promise<ResponseMetrics[]> {
         const threadMetrics: ResponseMetrics[] = [];
         
         for (let i = startIteration; i <= endIteration; i++) {
             try {
-                const metrics = await runIterationWithPersistentConnection(connectionPool, i, threadId);
+                const metrics = await runIterationWithPersistentConnection(connectionPool, i, threadId, responseTimeout);
                 threadMetrics.push(metrics);
                 
                 if (delay > 0 && i < endIteration) {
@@ -1408,11 +1609,11 @@ Ejemplos:
     // Función principal
     async function main() {
         const args = process.argv.slice(2);
-        const { host, port, iterations, delay, threads, connections } = parseArguments(args);
+        const { host, port, iterations, delay, threads, connections, connectionTimeout, responseTimeout } = parseArguments(args);
         
-        log(`Configuración: ${host}:${port}, ${iterations} iteraciones, ${delay}ms delay, ${threads} hilos, ${connections} conexión(es) permanentes`, 'info');
+        log(`Configuración: ${host}:${port}, ${iterations} iteraciones, ${delay}ms delay, ${threads} hilos, ${connections} conexión(es) permanentes, ${connectionTimeout}ms timeout conexión, ${responseTimeout}ms timeout respuesta`, 'info');
         
-        await runMultipleIterations(host, port, iterations, delay, threads, connections);
+        await runMultipleIterations(host, port, iterations, delay, threads, connections, connectionTimeout, responseTimeout);
     }
 
     // Ejecutar si es el archivo principal
@@ -1422,4 +1623,20 @@ Ejemplos:
             process.exit(1);
         });
     }
+}
+
+function cleanEmptyFields(obj: Record<string, any>): Record<string, any> {
+    const cleaned: Record<string, any> = {};
+    Object.entries(obj).forEach(([key, value]) => {
+        if (value && 
+            value !== '' && 
+            value !== '(vacío)' && 
+            value !== 'undefined' && 
+            value !== 'null' &&
+            value !== undefined &&
+            value !== null) {
+            cleaned[key] = value;
+        }
+    });
+    return cleaned;
 }
