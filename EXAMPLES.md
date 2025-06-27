@@ -41,6 +41,9 @@ node dist/tcp-server.js
 
 # O con NPM
 npm run client -- --ip 127.0.0.1 --pt 6020 --it 10 --th 2
+
+# Prueba con conexiones permanentes
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --cn 3
 ```
 
 ## 📊 Escenarios de Prueba
@@ -134,6 +137,38 @@ npm run client -- --ip 127.0.0.1 --pt 6020 --it 10 --th 2
 - ⏱️ Ajustar timeouts si es necesario
 - 📡 Monitorear latencia de red
 
+### Escenario 6: Prueba con Conexiones Permanentes
+
+**Propósito**: Evaluar rendimiento con conexiones TCP permanentes.
+
+```bash
+# Servidor
+./run-server.sh
+
+# Cliente con múltiples conexiones
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 200 --th 4 --cn 4 --dl 0
+```
+
+**Resultado Esperado**:
+
+- ✅ 4 conexiones permanentes establecidas
+- ✅ 200 iteraciones distribuidas entre conexiones
+- ✅ Mejor rendimiento que conexiones individuales
+- ✅ Estadísticas de pool en el reporte
+
+**Variaciones**:
+
+```bash
+# Conexión única (simula cliente tradicional)
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --cn 1
+
+# Conexiones múltiples (mejor rendimiento)
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 500 --th 10 --cn 5
+
+# Conexión por hilo (paralelismo máximo)
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 1000 --th 8 --cn 8
+```
+
 ## 🔧 Configuraciones Avanzadas
 
 ### Configuración de Variables de Entorno
@@ -183,6 +218,69 @@ PORT=8080 ./run-server.sh
 
 # Cliente conectando a puerto personalizado
 ./run-client.sh --ip 127.0.0.1 --pt 8080 --it 10 --th 2
+```
+
+### 4. Prueba con Delay
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 50 --dl 100
+```
+
+**Resultado esperado:** 50 mensajes con 100ms de delay entre cada uno.
+
+### 5. Prueba de Carga Alta
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 1000 --th 10
+```
+
+**Resultado esperado:** 1000 mensajes distribuidos entre 10 hilos (100 mensajes por hilo).
+
+### 6. Prueba con Conexiones Permanentes (Configuración Óptima)
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 500 --th 8 --cn 8
+```
+
+**Resultado esperado:** 500 mensajes distribuidos entre 8 hilos usando 8 conexiones permanentes (1:1).
+
+### 7. Prueba con Conexiones Compartidas
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 500 --th 10 --cn 3
+```
+
+**Resultado esperado:** 500 mensajes distribuidos entre 10 hilos usando 3 conexiones permanentes (compartidas).
+
+## 🔍 Validaciones y Advertencias
+
+### Configuración Óptima (1:1)
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --cn 5
+```
+
+**Mensaje esperado:** `✅ Configuración óptima: 5 conexión(es) para 5 hilos (1:1)`
+
+### Más Conexiones que Hilos
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 3 --cn 5
+```
+
+**Mensaje esperado:** `ℹ️ INFO: Tienes 5 conexión(es) para 3 hilos. Las conexiones adicionales permitirán mejor rendimiento.`
+
+### Más Hilos que Conexiones (Advertencia)
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --cn 3
+```
+
+**Mensaje esperado:**
+
+```
+⚠️ ADVERTENCIA: Tienes 5 hilos pero solo 3 conexión(es). Algunos hilos tendrán que esperar a que las conexiones estén disponibles.
+💡 Recomendación: Usar --cn 5 para tener una conexión por hilo, o reducir --th a 3 para usar una conexión por hilo.
 ```
 
 ## 📈 Interpretación de Resultados
@@ -366,3 +464,21 @@ jobs:
 ---
 
 **EchoTest** - Herramienta profesional para pruebas de carga y rendimiento en sistemas ISO 8583 🚀
+
+## Análisis de Resultados
+
+### Reportes Generados
+
+- **Reporte HTML:** `tmp/echotest-report-YYYY-MM-DD-HH-MM-SS.html`
+- **Logs:** `log/echotest-YYYY-MM-DD-HH-MM-SS.log`
+
+### Características del Reporte
+
+- **Agrupamiento por Conexiones:** Los detalles se organizan por conexión permanente para facilitar el análisis
+- **Estadísticas por Conexión:** Cada conexión muestra sus propias métricas (tiempo promedio, tasa de éxito, etc.)
+- **Métricas Importantes:**
+  - **Tiempo total:** Duración completa de la prueba
+  - **Throughput:** Mensajes por segundo
+  - **Latencia promedio:** Tiempo promedio de respuesta
+  - **Latencia mín/máx:** Valores extremos de latencia
+  - **Tasa de éxito:** Porcentaje de mensajes exitosos

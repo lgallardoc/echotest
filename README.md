@@ -107,6 +107,7 @@ Opciones:
   --it <iteraciones>  Número de iteraciones (default: 1)
   --dl <delay>        Delay entre iteraciones en ms (default: 0)
   --th <hilos>        Número de hilos para paralelización (default: 1)
+  --cn <n>           Número de conexiones permanentes (default: 1)
   --help              Mostrar ayuda
 ```
 
@@ -127,7 +128,81 @@ node dist/tcp-client.js --ip 192.168.1.100 --pt 8080 --it 1000 --th 8
 
 # Prueba de estrés
 node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 2000 --th 20 --dl 0
+
+# Prueba con conexiones permanentes
+node dist/tcp-client.js --ip 127.0.0.1 --pt 6020 --it 1000 --th 5 --cn 3
 ```
+
+## 🔗 Conexiones Permanentes
+
+EchoTest soporta conexiones TCP permanentes para mejorar el rendimiento y simular escenarios reales de producción.
+
+### Características
+
+- **Pool de Conexiones**: Establece un número fijo de conexiones al inicio
+- **Distribución de Carga**: Las iteraciones se distribuyen automáticamente entre las conexiones disponibles
+- **Reutilización**: Las conexiones se reutilizan para múltiples transacciones
+- **Gestión Automática**: Las conexiones se cierran automáticamente al finalizar las pruebas
+
+### Configuración
+
+```bash
+# Una sola conexión (comportamiento tradicional)
+--cn 1
+
+# Múltiples conexiones para mejor rendimiento
+--cn 5
+
+# Conexiones igual al número de hilos
+--cn 10 --th 10
+```
+
+### Escenarios de Uso
+
+#### 1. Conexión Única
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --cn 1
+```
+
+- **Ventaja**: Simula cliente con una sola conexión
+- **Comportamiento**: Las iteraciones esperan a que la conexión esté disponible
+- **Uso**: Pruebas de concurrencia y límites de conexión
+
+#### 2. Conexiones Múltiples
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 1000 --th 10 --cn 5
+```
+
+- **Ventaja**: Mejor rendimiento, menor overhead de conexión
+- **Comportamiento**: Distribución automática de carga
+- **Uso**: Pruebas de rendimiento y carga
+
+#### 3. Conexiones por Hilo
+
+```bash
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 500 --th 8 --cn 8
+```
+
+- **Ventaja**: Cada hilo tiene su propia conexión
+- **Comportamiento**: Paralelismo máximo
+- **Uso**: Pruebas de estrés y capacidad máxima
+
+### Ventajas de las Conexiones Permanentes
+
+1. **Mejor Rendimiento**: Elimina el overhead de abrir/cerrar conexiones
+2. **Simulación Realista**: Simula clientes de producción que mantienen conexiones
+3. **Control de Concurrencia**: Permite controlar el número máximo de conexiones simultáneas
+4. **Análisis de Cuellos de Botella**: Identifica límites de conexión del servidor
+5. **Métricas Detalladas**: Estadísticas por conexión en los reportes
+
+### Consideraciones
+
+- **Memoria**: Más conexiones = más uso de memoria
+- **Límites del Servidor**: El servidor puede tener límites de conexiones concurrentes
+- **Red**: Considerar el impacto en la red para pruebas remotas
+- **Timeout**: Las conexiones tienen timeout configurable (30s por defecto)
 
 ## 📊 Reportes y Logs
 
@@ -160,6 +235,19 @@ echotest/
 - **Desglose de Mensajes**: Request/Response ISO 8583 detallados
 - **Estadísticas**: Promedios, mínimos, máximos
 - **Análisis por Hilo**: Distribución de carga y rendimiento
+
+### Características del Reporte
+
+- **Agrupamiento por Conexiones:** Los detalles se organizan por conexión permanente para facilitar el análisis
+- **Información de Red:** Cada conexión muestra IP origen, puerto origen, IP destino y puerto destino
+- **Estadísticas por Conexión:** Cada conexión muestra sus propias métricas (tiempo promedio, tasa de éxito, etc.)
+- **Validación de Configuración:** Advertencias cuando el número de hilos no coincide con el número de conexiones
+- **Métricas Importantes:**
+  - **Tiempo total:** Duración completa de la prueba
+  - **Throughput:** Mensajes por segundo
+  - **Latencia promedio:** Tiempo promedio de respuesta
+  - **Latencia mín/máx:** Valores extremos de latencia
+  - **Tasa de éxito:** Porcentaje de mensajes exitosos
 
 ## 🔧 Configuración del Servidor
 

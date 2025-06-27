@@ -144,6 +144,7 @@ function log(message: string, level: 'debug' | 'info' | 'error' = 'debug'): void
 interface ResponseMetrics {
     iteration: number;
     threadId: number;
+    connectionId: number;
     startTime: number;
     endTime: number;
     responseTime: number;
@@ -163,6 +164,169 @@ interface LoadMetrics {
     minute: string;
     second: string;
     count: number;
+}
+
+// Interfaz para conexiones permanentes
+interface PersistentConnection {
+    id: number;
+    socket: net.Socket;
+    isConnected: boolean;
+    isBusy: boolean;
+    currentIteration?: number;
+    currentThreadId?: number;
+    lastUsed: number;
+    totalTransactions: number;
+    // Información de red
+    localAddress?: string;
+    localPort?: number;
+    remoteAddress?: string;
+    remotePort?: number;
+}
+
+// Pool de conexiones permanentes
+class ConnectionPool {
+    private connections: PersistentConnection[] = [];
+    private host: string;
+    private port: number;
+    private maxConnections: number;
+    private connectionTimeout: number = 30000; // 30 segundos
+
+    constructor(host: string, port: number, maxConnections: number) {
+        this.host = host;
+        this.port = port;
+        this.maxConnections = maxConnections;
+    }
+
+    async initialize(): Promise<void> {
+        log(`Inicializando pool de ${this.maxConnections} conexión(es) permanentes a ${this.host}:${this.port}`, 'info');
+        
+        const connectionPromises: Promise<PersistentConnection>[] = [];
+        
+        for (let i = 0; i < this.maxConnections; i++) {
+            connectionPromises.push(this.createConnection(i + 1));
+        }
+        
+        this.connections = await Promise.all(connectionPromises);
+        log(`Pool de conexiones inicializado con ${this.connections.length} conexión(es)`, 'info');
+    }
+
+    private createConnection(id: number): Promise<PersistentConnection> {
+        return new Promise((resolve, reject) => {
+            const socket = new net.Socket();
+            const connection: PersistentConnection = {
+                id,
+                socket,
+                isConnected: false,
+                isBusy: false,
+                lastUsed: Date.now(),
+                totalTransactions: 0
+            };
+
+            const timeout = setTimeout(() => {
+                reject(new Error(`Timeout al crear conexión ${id}`));
+            }, this.connectionTimeout);
+
+            socket.on('connect', () => {
+                clearTimeout(timeout);
+                connection.isConnected = true;
+                connection.lastUsed = Date.now();
+                
+                // Capturar información de red
+                connection.localAddress = socket.localAddress;
+                connection.localPort = socket.localPort;
+                connection.remoteAddress = socket.remoteAddress;
+                connection.remotePort = socket.remotePort;
+                
+                log(`Conexión permanente ${id} establecida: ${connection.localAddress}:${connection.localPort} -> ${connection.remoteAddress}:${connection.remotePort}`, 'info');
+                resolve(connection);
+            });
+
+            socket.on('error', (error) => {
+                clearTimeout(timeout);
+                log(`Error en conexión permanente ${id}: ${error.message}`, 'error');
+                reject(error);
+            });
+
+            socket.on('close', () => {
+                connection.isConnected = false;
+                log(`Conexión permanente ${id} cerrada`, 'info');
+            });
+
+            socket.on('timeout', () => {
+                connection.isConnected = false;
+                log(`Timeout en conexión permanente ${id}`, 'error');
+            });
+
+            socket.connect(this.port, this.host);
+        });
+    }
+
+    getAvailableConnection(): PersistentConnection | null {
+        const available = this.connections.find(conn => 
+            conn.isConnected && !conn.isBusy
+        );
+        
+        if (available) {
+            available.isBusy = true;
+            available.lastUsed = Date.now();
+            return available;
+        }
+        
+        return null;
+    }
+
+    releaseConnection(connectionId: number): void {
+        const connection = this.connections.find(conn => conn.id === connectionId);
+        if (connection) {
+            connection.isBusy = false;
+            connection.currentIteration = undefined;
+            connection.currentThreadId = undefined;
+        }
+    }
+
+    async closeAll(): Promise<void> {
+        log('Cerrando todas las conexiones permanentes...', 'info');
+        
+        const closePromises = this.connections.map(conn => {
+            return new Promise<void>((resolve) => {
+                if (conn.isConnected) {
+                    conn.socket.once('close', () => resolve());
+                    conn.socket.destroy();
+                } else {
+                    resolve();
+                }
+            });
+        });
+        
+        await Promise.all(closePromises);
+        log('Todas las conexiones permanentes cerradas', 'info');
+    }
+
+    getStats(): { total: number; connected: number; busy: number; totalTransactions: number } {
+        const connected = this.connections.filter(conn => conn.isConnected).length;
+        const busy = this.connections.filter(conn => conn.isBusy).length;
+        const totalTransactions = this.connections.reduce((sum, conn) => sum + conn.totalTransactions, 0);
+        
+        return {
+            total: this.connections.length,
+            connected,
+            busy,
+            totalTransactions
+        };
+    }
+
+    getConnectionInfo(connectionId: number): { localAddress?: string; localPort?: number; remoteAddress?: string; remotePort?: number } | null {
+        const connection = this.connections.find(conn => conn.id === connectionId);
+        if (connection) {
+            return {
+                localAddress: connection.localAddress,
+                localPort: connection.localPort,
+                remoteAddress: connection.remoteAddress,
+                remotePort: connection.remotePort
+            };
+        }
+        return null;
+    }
 }
 
 // Función para generar métricas de carga por tiempo
@@ -235,7 +399,7 @@ function generateLoadChartData(metrics: ResponseMetrics[]) {
 }
 
 // Función para generar reporte HTML con gráficos
-function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: number, iterations: number, delay: number, threads: number): string {
+function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: number, iterations: number, delay: number, threads: number, connections: number, connectionPool?: ConnectionPool): string {
     const successfulMetrics = metrics.filter(m => m.success);
     const failedMetrics = metrics.filter(m => !m.success);
     
@@ -486,6 +650,10 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                 <h3>TPS Promedio</h3>
                 <div class="value">${totalTime > 0 ? ((successfulMetrics.length / (totalTime / 1000))).toFixed(2) : '0'}<span class="unit">tx/s</span></div>
             </div>
+            <div class="stat-card">
+                <h3>Conexiones Permanentes</h3>
+                <div class="value">${connections}<span class="unit">conexiones</span></div>
+            </div>
         </div>
 
         <div class="charts-section">
@@ -506,36 +674,119 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
         </div>
 
         <div class="details-section">
-            <h2>📋 Detalles de Request y Response</h2>
-            ${metrics.map((metric, index) => `
-                <div class="iteration-details">
-                    <div class="iteration-header">
-                        Iteración ${metric.iteration} (Hilo ${metric.threadId}) - ${metric.success ? '✅ Exitoso' : '❌ Fallido'}
-                    </div>
-                    <div>⏱️ Tiempo de respuesta: ${metric.responseTime}ms</div>
-                    <div>🕐 Timestamp: ${metric.timestamp}</div>
-                    ${metric.requestDetails && metric.responseDetails ? `
-                        <div class="message-details">
-                            <div class="message-box">
-                                <h4>📤 Request (MTI 0800)</h4>
-                                <div class="field-list">
-                                    ${Object.entries(metric.requestDetails).map(([key, value]) => 
-                                        `<div class="field-item"><strong>${key}:</strong> ${value || '(vacío)'}</div>`
-                                    ).join('')}
-                                </div>
+            <h2>📋 Detalles de Request y Response por Conexión</h2>
+            ${(() => {
+                // Agrupar métricas por conexión, excluyendo connectionId 0 (errores)
+                const connectionGroups = new Map<number, ResponseMetrics[]>();
+                metrics.forEach(metric => {
+                    // Solo incluir métricas de conexiones reales (connectionId > 0)
+                    if (metric.connectionId > 0) {
+                        if (!connectionGroups.has(metric.connectionId)) {
+                            connectionGroups.set(metric.connectionId, []);
+                        }
+                        connectionGroups.get(metric.connectionId)!.push(metric);
+                    }
+                });
+                
+                // Ordenar conexiones por ID
+                const sortedConnections = Array.from(connectionGroups.keys()).sort((a, b) => a - b);
+                
+                return sortedConnections.map(connectionId => {
+                    const connectionMetrics = connectionGroups.get(connectionId)!;
+                    const successfulCount = connectionMetrics.filter(m => m.success).length;
+                    const failedCount = connectionMetrics.filter(m => !m.success).length;
+                    const avgResponseTime = connectionMetrics.length > 0 ? 
+                        connectionMetrics.reduce((sum, m) => sum + m.responseTime, 0) / connectionMetrics.length : 0;
+                    
+                    // Obtener información de red de la conexión
+                    const connectionInfo = connectionPool?.getConnectionInfo(connectionId);
+                    const networkInfo = connectionInfo ? 
+                        `${connectionInfo.localAddress}:${connectionInfo.localPort} → ${connectionInfo.remoteAddress}:${connectionInfo.remotePort}` :
+                        'Información de red no disponible';
+                    
+                    return `
+                        <div class="connection-group" style="margin: 30px 0; padding: 20px; border: 2px solid #667eea; border-radius: 10px; background-color: #f8f9ff;">
+                            <h3 style="margin: 0 0 15px 0; color: #667eea; font-size: 1.3em;">
+                                🔗 Conexión ${connectionId} 
+                                <span style="font-size: 0.8em; color: #666;">
+                                    (${connectionMetrics.length} transacciones, ${successfulCount} éxitos, ${failedCount} fallos)
+                                </span>
+                            </h3>
+                            <div style="margin-bottom: 15px; padding: 10px; background-color: #e3f2fd; border-radius: 5px;">
+                                <strong>🌐 Información de Red:</strong><br>
+                                • <strong>Origen:</strong> ${connectionInfo?.localAddress || 'N/A'}:${connectionInfo?.localPort || 'N/A'}<br>
+                                • <strong>Destino:</strong> ${connectionInfo?.remoteAddress || 'N/A'}:${connectionInfo?.remotePort || 'N/A'}<br>
+                                • <strong>Ruta:</strong> ${networkInfo}
                             </div>
-                            <div class="message-box">
-                                <h4>📥 Response (MTI 0810)</h4>
-                                <div class="field-list">
-                                    ${Object.entries(metric.responseDetails).map(([key, value]) => 
-                                        `<div class="field-item"><strong>${key}:</strong> ${value || '(vacío)'}</div>`
-                                    ).join('')}
-                                </div>
+                            <div style="margin-bottom: 15px; padding: 10px; background-color: #e8f5e8; border-radius: 5px;">
+                                <strong>📊 Estadísticas de la Conexión:</strong><br>
+                                • Tiempo promedio de respuesta: ${avgResponseTime.toFixed(2)}ms<br>
+                                • Tasa de éxito: ${connectionMetrics.length > 0 ? ((successfulCount / connectionMetrics.length) * 100).toFixed(2) : '0'}%<br>
+                                • Transacciones totales: ${connectionMetrics.length}
                             </div>
+                            ${connectionMetrics.map((metric, index) => `
+                                <div class="iteration-details" style="margin: 15px 0; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #fafafa;">
+                                    <div class="iteration-header">
+                                        Iteración ${metric.iteration} (Hilo ${metric.threadId}) - ${metric.success ? '✅ Exitoso' : '❌ Fallido'}
+                                    </div>
+                                    <div>⏱️ Tiempo de respuesta: ${metric.responseTime}ms</div>
+                                    <div>🕐 Timestamp: ${metric.timestamp}</div>
+                                    ${metric.requestDetails && metric.responseDetails ? `
+                                        <div class="message-details">
+                                            <div class="message-box">
+                                                <h4>📤 Request (MTI 0800)</h4>
+                                                <div class="field-list">
+                                                    ${Object.entries(metric.requestDetails).map(([key, value]) => 
+                                                        `<div class="field-item"><strong>${key}:</strong> ${value || '(vacío)'}</div>`
+                                                    ).join('')}
+                                                </div>
+                                            </div>
+                                            <div class="message-box">
+                                                <h4>📥 Response (MTI 0810)</h4>
+                                                <div class="field-list">
+                                                    ${Object.entries(metric.responseDetails).map(([key, value]) => 
+                                                        `<div class="field-item"><strong>${key}:</strong> ${value || '(vacío)'}</div>`
+                                                    ).join('')}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ` : '<div>⚠️ No hay detalles disponibles</div>'}
+                                </div>
+                            `).join('')}
                         </div>
-                    ` : '<div>⚠️ No hay detalles disponibles</div>'}
-                </div>
-            `).join('')}
+                    `;
+                }).join('');
+            })()}
+            
+            ${(() => {
+                // Mostrar errores de conexión (connectionId 0) en una sección separada
+                const errorMetrics = metrics.filter(m => m.connectionId === 0);
+                if (errorMetrics.length > 0) {
+                    return `
+                        <div class="error-section" style="margin: 30px 0; padding: 20px; border: 2px solid #dc3545; border-radius: 10px; background-color: #fff5f5;">
+                            <h3 style="margin: 0 0 15px 0; color: #dc3545; font-size: 1.3em;">
+                                ⚠️ Errores de Conexión (${errorMetrics.length} errores)
+                            </h3>
+                            <div style="margin-bottom: 15px; padding: 10px; background-color: #ffe6e6; border-radius: 5px;">
+                                <strong>📋 Errores que ocurrieron cuando no había conexiones disponibles:</strong><br>
+                                • Total de errores: ${errorMetrics.length}<br>
+                                • Hilos afectados: ${new Set(errorMetrics.map(m => m.threadId)).size}
+                            </div>
+                            ${errorMetrics.map((metric, index) => `
+                                <div class="error-details" style="margin: 15px 0; padding: 15px; border: 1px solid #dc3545; border-radius: 8px; background-color: #fff5f5;">
+                                    <div class="error-header" style="font-weight: bold; color: #dc3545; margin-bottom: 10px;">
+                                        Iteración ${metric.iteration} (Hilo ${metric.threadId}) - ❌ Error de Conexión
+                                    </div>
+                                    <div>⏱️ Tiempo de respuesta: ${metric.responseTime}ms</div>
+                                    <div>🕐 Timestamp: ${metric.timestamp}</div>
+                                    <div>❌ Error: ${metric.error || 'Error desconocido'}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+                return '';
+            })()}
         </div>
     </div>
 
@@ -820,21 +1071,24 @@ Opciones:
   --it <iteraciones>  Número de iteraciones (default: 1)
   --dl <delay>        Delay entre iteraciones en ms (default: 0)
   --th <hilos>        Número de hilos para paralelización (default: 1)
+  --cn <n>            Número de conexiones permanentes (default: 1)
   --help              Mostrar esta ayuda
 
 Ejemplos:
   ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 100 --dl 50
   ts-node tcp-client.ts --ip 192.168.1.100 --pt 8080 --it 500 --dl 0 --th 10
+  ts-node tcp-client.ts --ip 127.0.0.1 --pt 6020 --it 1000 --th 5 --cn 3
   ts-node tcp-client.ts --help
         `);
     }
 
-    function parseArguments(args: string[]): { host: string; port: number; iterations: number; delay: number; threads: number } {
+    function parseArguments(args: string[]): { host: string; port: number; iterations: number; delay: number; threads: number; connections: number } {
         let host = '10.245.229.25';
         let port = 6020;
         let iterations = 1;
         let delay = 0;
         let threads = 1;
+        let connections = 1; // Valor por defecto: 1 conexión
 
         for (let i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -853,6 +1107,9 @@ Ejemplos:
                 case '--th':
                     threads = parseInt(args[++i]) || threads;
                     break;
+                case '--cn':
+                    connections = parseInt(args[++i]) || connections;
+                    break;
                 case '--help':
                     showHelp();
                     process.exit(0);
@@ -860,24 +1117,52 @@ Ejemplos:
             }
         }
 
-        return { host, port, iterations, delay, threads };
+        return { host, port, iterations, delay, threads, connections };
     }
 
-    // Función para ejecutar una iteración
-    function runIteration(host: string, port: number, iterationNumber: number, delay: number, threadId: number): Promise<ResponseMetrics> {
+    // Función para ejecutar una iteración usando conexiones permanentes
+    function runIterationWithPersistentConnection(
+        connectionPool: ConnectionPool, 
+        iterationNumber: number, 
+        threadId: number
+    ): Promise<ResponseMetrics> {
         return new Promise((resolve, reject) => {
-            log(`Ejecutando iteración ${iterationNumber} en hilo ${threadId}`, 'info');
-            
             const startTime = Date.now();
             const timestamp = new Date().toISOString();
             
-            const client = createTcpClient(host, port);
-            let isResolved = false;
             let requestMessage = '';
             let requestDetails: Record<string, string> = {};
             let responseMessage = '';
             let responseDetails: Record<string, string> = {};
+            let isResolved = false;
             
+            // Obtener una conexión disponible del pool
+            const connection = connectionPool.getAvailableConnection();
+            if (!connection) {
+                const endTime = Date.now();
+                const responseTime = endTime - startTime;
+                
+                const metrics: ResponseMetrics = {
+                    iteration: iterationNumber,
+                    threadId: threadId,
+                    connectionId: 0,
+                    startTime: startTime,
+                    endTime: endTime,
+                    responseTime: responseTime,
+                    success: false,
+                    error: 'No hay conexiones disponibles en el pool',
+                    timestamp: timestamp,
+                    requestMessage: requestMessage,
+                    requestDetails: requestDetails,
+                    responseMessage: responseMessage,
+                    responseDetails: responseDetails
+                };
+                
+                log(`Error en iteración ${iterationNumber} en hilo ${threadId}: No hay conexiones disponibles`, 'error');
+                resolve(metrics);
+                return;
+            }
+
             // Función para resolver la promesa de forma segura
             const safeResolve = (success: boolean, error?: string) => {
                 if (!isResolved) {
@@ -888,6 +1173,7 @@ Ejemplos:
                     const metrics: ResponseMetrics = {
                         iteration: iterationNumber,
                         threadId: threadId,
+                        connectionId: connection.id,
                         startTime: startTime,
                         endTime: endTime,
                         responseTime: responseTime,
@@ -914,6 +1200,7 @@ Ejemplos:
                     const metrics: ResponseMetrics = {
                         iteration: iterationNumber,
                         threadId: threadId,
+                        connectionId: connection.id,
                         startTime: startTime,
                         endTime: endTime,
                         responseTime: responseTime,
@@ -931,48 +1218,78 @@ Ejemplos:
                 }
             };
 
-            client.socket.on('connect', () => {
-                log(`Conectado al servidor en iteración ${iterationNumber} (hilo ${threadId})`, 'info');
-            });
+            // Configurar la conexión para esta iteración
+            connection.currentIteration = iterationNumber;
+            connection.currentThreadId = threadId;
+            
+            log(`Ejecutando iteración ${iterationNumber} en hilo ${threadId} usando conexión permanente ${connection.id}`, 'info');
 
-            client.socket.on('data', (data) => {
+            // Crear y enviar el mensaje ISO 8583
+            const isoMessage = createIso8583EchoTestMessage();
+            const serializedMessage = serializeIso8583Message(isoMessage);
+            
+            requestMessage = serializedMessage;
+            requestDetails = deserializeIso8583Message(serializedMessage);
+            
+            log(`Enviando mensaje ISO 8583 por conexión ${connection.id}: ${serializedMessage}`, 'debug');
+
+            // Configurar listeners para esta iteración específica
+            const onData = (data: Buffer) => {
                 const response = data.toString('ascii');
-                log(`Respuesta recibida en iteración ${iterationNumber} (hilo ${threadId}): ${response}`, 'debug');
+                log(`Respuesta recibida en iteración ${iterationNumber} (hilo ${threadId}) por conexión ${connection.id}: ${response}`, 'debug');
                 
-                // Obtener los datos del request y response del cliente
-                const requestData = client.getRequestData();
-                const responseData = client.getResponseData();
+                responseMessage = response;
+                responseDetails = deserializeIso8583Message(response);
                 
-                // Actualizar las variables locales con los datos del cliente
-                requestMessage = requestData.message;
-                requestDetails = requestData.details;
-                responseMessage = responseData.message;
-                responseDetails = responseData.details;
+                // Incrementar contador de transacciones
+                connection.totalTransactions++;
+                
+                // Liberar la conexión
+                connectionPool.releaseConnection(connection.id);
+                
+                // Limpiar listeners
+                connection.socket.removeListener('data', onData);
+                connection.socket.removeListener('error', onError);
                 
                 safeResolve(true);
-            });
+            };
 
-            client.socket.on('error', (error) => {
-                log(`Error de conexión en iteración ${iterationNumber} (hilo ${threadId}): ${error.message}`, 'error');
+            const onError = (error: Error) => {
+                log(`Error de conexión en iteración ${iterationNumber} (hilo ${threadId}) por conexión ${connection.id}: ${error.message}`, 'error');
+                
+                // Liberar la conexión
+                connectionPool.releaseConnection(connection.id);
+                
+                // Limpiar listeners
+                connection.socket.removeListener('data', onData);
+                connection.socket.removeListener('error', onError);
+                
                 safeReject(error);
-            });
+            };
 
-            client.socket.on('close', () => {
-                if (!isResolved) {
-                    safeResolve(true);
-                }
-            });
+            // Agregar listeners
+            connection.socket.once('data', onData);
+            connection.socket.once('error', onError);
 
-            client.socket.on('timeout', () => {
-                log(`Timeout en iteración ${iterationNumber} (hilo ${threadId})`, 'error');
-                safeReject(new Error('Timeout de conexión'));
-            });
+            // Enviar mensaje
+            const messageBuffer = Buffer.from(serializedMessage, 'ascii');
+            connection.socket.write(messageBuffer);
         });
     }
 
     // Función para ejecutar múltiples iteraciones en paralelo
-    async function runMultipleIterations(host: string, port: number, iterations: number, delay: number, threads: number) {
-        log(`Iniciando ${iterations} iteración(es) hacia ${host}:${port} con ${threads} hilos`, 'info');
+    async function runMultipleIterations(host: string, port: number, iterations: number, delay: number, threads: number, connections: number) {
+        log(`Iniciando ${iterations} iteración(es) hacia ${host}:${port} con ${threads} hilos y ${connections} conexión(es) permanentes`, 'info');
+        
+        // Validar configuración de conexiones vs hilos
+        if (connections < threads) {
+            log(`⚠️  ADVERTENCIA: Tienes ${threads} hilos pero solo ${connections} conexión(es). Algunos hilos tendrán que esperar a que las conexiones estén disponibles.`, 'info');
+            log(`💡 Recomendación: Usar --cn ${threads} para tener una conexión por hilo, o reducir --th a ${connections} para usar una conexión por hilo.`, 'info');
+        } else if (connections > threads) {
+            log(`ℹ️  INFO: Tienes ${connections} conexión(es) para ${threads} hilos. Las conexiones adicionales permitirán mejor rendimiento.`, 'info');
+        } else {
+            log(`✅ Configuración óptima: ${connections} conexión(es) para ${threads} hilos (1:1)`, 'info');
+        }
         
         const metrics: ResponseMetrics[] = [];
         let isRunning = true;
@@ -987,6 +1304,10 @@ Ejemplos:
         process.on('SIGTERM', cleanup);
         
         try {
+            // Crear pool de conexiones permanentes
+            const connectionPool = new ConnectionPool(host, port, connections);
+            await connectionPool.initialize();
+            
             // Dividir las iteraciones entre los hilos
             const iterationsPerThread = Math.ceil(iterations / threads);
             const promises: Promise<ResponseMetrics[]>[] = [];
@@ -996,7 +1317,7 @@ Ejemplos:
                 const endIteration = Math.min((threadId + 1) * iterationsPerThread, iterations);
                 
                 if (startIteration <= iterations) {
-                    const threadPromise = runThread(host, port, startIteration, endIteration, delay, threadId + 1);
+                    const threadPromise = runThread(connectionPool, startIteration, endIteration, delay, threadId + 1);
                     promises.push(threadPromise);
                 }
             }
@@ -1014,7 +1335,14 @@ Ejemplos:
             
             log(`Todas las ${iterations} iteración(es) completadas`, 'info');
             
-            const htmlReport = generateHtmlReport(metrics, host, port, iterations, delay, threads);
+            // Mostrar estadísticas del pool de conexiones
+            const poolStats = connectionPool.getStats();
+            log(`Estadísticas del pool: ${poolStats.connected}/${poolStats.total} conexiones activas, ${poolStats.totalTransactions} transacciones totales`, 'info');
+            
+            // Cerrar todas las conexiones
+            await connectionPool.closeAll();
+            
+            const htmlReport = generateHtmlReport(metrics, host, port, iterations, delay, threads, connections, connectionPool);
             const reportFilename = saveHtmlReport(htmlReport, host, port);
             
             const path = require('path');
@@ -1046,12 +1374,12 @@ Ejemplos:
     }
 
     // Función para ejecutar un hilo de iteraciones
-    async function runThread(host: string, port: number, startIteration: number, endIteration: number, delay: number, threadId: number): Promise<ResponseMetrics[]> {
+    async function runThread(connectionPool: ConnectionPool, startIteration: number, endIteration: number, delay: number, threadId: number): Promise<ResponseMetrics[]> {
         const threadMetrics: ResponseMetrics[] = [];
         
         for (let i = startIteration; i <= endIteration; i++) {
             try {
-                const metrics = await runIteration(host, port, i, delay, threadId);
+                const metrics = await runIterationWithPersistentConnection(connectionPool, i, threadId);
                 threadMetrics.push(metrics);
                 
                 if (delay > 0 && i < endIteration) {
@@ -1062,6 +1390,7 @@ Ejemplos:
                 const errorMetrics: ResponseMetrics = {
                     iteration: i,
                     threadId: threadId,
+                    connectionId: 0, // No hay conexión disponible en caso de error
                     startTime: Date.now(),
                     endTime: Date.now(),
                     responseTime: 0,
@@ -1079,11 +1408,11 @@ Ejemplos:
     // Función principal
     async function main() {
         const args = process.argv.slice(2);
-        const { host, port, iterations, delay, threads } = parseArguments(args);
+        const { host, port, iterations, delay, threads, connections } = parseArguments(args);
         
-        log(`Configuración: ${host}:${port}, ${iterations} iteraciones, ${delay}ms delay, ${threads} hilos`, 'info');
+        log(`Configuración: ${host}:${port}, ${iterations} iteraciones, ${delay}ms delay, ${threads} hilos, ${connections} conexión(es) permanentes`, 'info');
         
-        await runMultipleIterations(host, port, iterations, delay, threads);
+        await runMultipleIterations(host, port, iterations, delay, threads, connections);
     }
 
     // Ejecutar si es el archivo principal

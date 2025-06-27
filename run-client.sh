@@ -39,12 +39,14 @@ if [ $# -eq 0 ]; then
     echo "  --it <iteraciones>  Número de iteraciones (default: 1)"
     echo "  --dl <delay>        Delay entre iteraciones en ms (default: 0)"
     echo "  --th <hilos>        Número de hilos para paralelización (default: 1)"
+    echo "  --cn <n>            Número de conexiones permanentes (default: 1)"
     echo "  --help              Mostrar esta ayuda"
     echo ""
     echo "Ejemplos:"
     echo "  ./run-client.sh --ip 127.0.0.1 --pt 6020 --it 10 --th 2"
     echo "  ./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --dl 50"
     echo "  ./run-client.sh --ip 192.168.1.100 --pt 8080 --it 1000 --th 8"
+    echo "  ./run-client.sh --ip 127.0.0.1 --pt 6020 --it 500 --th 10 --cn 3"
     echo ""
     exit 0
 fi
@@ -59,11 +61,14 @@ if [[ "$*" == *"--help"* ]]; then
     echo "  --it <iteraciones>  Número de iteraciones (default: 1)"
     echo "  --dl <delay>        Delay entre iteraciones en ms (default: 0)"
     echo "  --th <hilos>        Número de hilos para paralelización (default: 1)"
+    echo "  --cn <n>            Número de conexiones permanentes (default: 1)"
+    echo "  --help              Mostrar esta ayuda"
     echo ""
     echo "Ejemplos:"
     echo "  ./run-client.sh --ip 127.0.0.1 --pt 6020 --it 10 --th 2"
     echo "  ./run-client.sh --ip 127.0.0.1 --pt 6020 --it 100 --th 5 --dl 50"
     echo "  ./run-client.sh --ip 192.168.1.100 --pt 8080 --it 1000 --th 8"
+    echo "  ./run-client.sh --ip 127.0.0.1 --pt 6020 --it 500 --th 10 --cn 3"
     echo ""
     exit 0
 fi
