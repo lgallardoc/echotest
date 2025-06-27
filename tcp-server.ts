@@ -114,16 +114,18 @@ function handleConnection(socket: net.Socket) {
                 
                 // Crear respuesta de Echo Test (MTI 0810)
                 // Mantener los mismos campos del request + campo 39
+                const field1 = parsedObj['1'] || ''; // Secondary Bitmap
                 const field7 = parsedObj['7'] || '';
                 const field11 = parsedObj['11'] || '';
                 const field37 = parsedObj['37'] || '';
                 const field70 = parsedObj['70']; // Usar el valor del request si está presente
                 
-                // Crear nueva instancia para la respuesta e inicializar con solo los campos que necesitamos
+                // Crear nueva instancia para la respuesta e inicializar con campos compatibles con AS/400
                 const responseIso = new ISO8583();
                 
-                // Inicializar la estructura con solo los campos específicos para el response
+                // Inicializar la estructura con campos compatibles con AS/400
                 responseIso.init([
+                    [1, { bitmap: 1, length: 16 }],   // Secondary Bitmap (8 bytes en hex)
                     [7, { bitmap: 7, length: 10 }],   // Transmission Date & Time
                     [11, { bitmap: 11, length: 6 }],  // Systems Trace Audit Number
                     [37, { bitmap: 37, length: 12 }], // Retrieval Reference Number
@@ -132,6 +134,7 @@ function handleConnection(socket: net.Socket) {
                 ]);
                 
                 // Configurar los valores de los campos
+                responseIso.set(1, field1); // Secondary Bitmap (mantener del request)
                 responseIso.set(7, field7); // Transmission Date & Time (mantener del request)
                 responseIso.set(11, field11); // Systems Trace Audit Number (mantener del request)
                 responseIso.set(37, field37); // Retrieval Reference Number (mantener del request)
@@ -145,7 +148,7 @@ function handleConnection(socket: net.Socket) {
                     logger.debug(`Campo 70 no presente en request, no incluido en respuesta`);
                 }
                 
-                logger.debug(`Campos configurados en respuesta: 7=${field7}, 11=${field11}, 37=${field37}, 39=00${field70 ? `, 70=${field70}` : ''}`);
+                logger.debug(`Campos configurados en respuesta: 1=${field1}, 7=${field7}, 11=${field11}, 37=${field37}, 39=00${field70 ? `, 70=${field70}` : ''}`);
                 
                 const responseMessage = responseIso.wrapMsg('0810');
                 logger.debug(`Respuesta generada: ${responseMessage}`);

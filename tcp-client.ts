@@ -20,11 +20,17 @@ export function createIso8583EchoTestMessage(): string {
     const stan = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
     const rrn = '005132' + stan; // RRN basado en STAN
     
-    // Crear instancia de ISO8583 e inicializar con solo los campos que necesitamos
+    // Crear instancia de ISO8583 e inicializar con campos compatibles con AS/400
     const iso = new ISO8583();
     
-    // Inicializar la estructura con solo los campos específicos para el request
+    // Inicializar la estructura con campos compatibles con AS/400
+    // Campo 1: Secondary Bitmap (16 caracteres = 8 bytes en hex)
+    // Campo 7: Transmission Date & Time (10 caracteres)
+    // Campo 11: Systems Trace Audit Number (6 caracteres)
+    // Campo 37: Retrieval Reference Number (12 caracteres)
+    // Campo 70: Network Management Information Code (3 caracteres)
     iso.init([
+        [1, { bitmap: 1, length: 16 }],   // Secondary Bitmap (8 bytes en hex)
         [7, { bitmap: 7, length: 10 }],   // Transmission Date & Time
         [11, { bitmap: 11, length: 6 }],  // Systems Trace Audit Number
         [37, { bitmap: 37, length: 12 }], // Retrieval Reference Number
@@ -32,7 +38,8 @@ export function createIso8583EchoTestMessage(): string {
     ]);
     
     // Establecer los valores de los campos
-    iso.set(7, dateTime.substring(0, 10)); // Fecha y hora del mensaje (MMDDhhmmss) - limitado a 10 caracteres
+    iso.set(1, '0400000000000000'); // Secondary Bitmap (bit 33 encendido para campo 70)
+    iso.set(7, dateTime.substring(0, 10)); // Fecha y hora del mensaje (MMDDhhmmss)
     iso.set(11, stan); // Número de rastreo del sistema
     iso.set(37, rrn); // RRN - Número de Referencia
     iso.set(70, '301'); // Código de gestión (Echo Test)
@@ -40,7 +47,7 @@ export function createIso8583EchoTestMessage(): string {
     // Generar mensaje ISO 8583
     let isoMessage = iso.wrapMsg('0800'); // MTI 0800 para Network Management Request
     
-    // Parsear el mensaje generado para verificar que solo contiene los campos esperados
+    // Parsear el mensaje generado para verificar que coincide con formato AS/400
     try {
         const debugIso = new ISO8583();
         const debugParsed = debugIso.unWrapMsg(isoMessage);
@@ -53,9 +60,15 @@ export function createIso8583EchoTestMessage(): string {
         
         console.log(`[DEBUG] Mensaje generado - campos con valor: ${JSON.stringify(debugObj)}`);
         
-        // Verificar si el bitmap secundario está presente
+        // Verificar bitmap primario y secundario
         const primaryBitmap = debugObj['PRIMARY_BITMAP'];
         const secondaryBitmap = debugObj['SECONDARY_BITMAP'];
+        
+        // Si no hay SECONDARY_BITMAP pero hay campo 1, agregarlo
+        if (!secondaryBitmap && debugObj['1']) {
+            debugObj['SECONDARY_BITMAP'] = debugObj['1'];
+            console.log(`[DEBUG] SECONDARY_BITMAP agregado al debug desde campo 1: ${debugObj['1']}`);
+        }
         
         if (primaryBitmap) {
             console.log(`[DEBUG] Bitmap primario: ${primaryBitmap}`);
@@ -86,21 +99,16 @@ export function createIso8583EchoTestMessage(): string {
                 }
             }
             
-            // Verificar si el campo 70 está presente en el mensaje aunque no esté en el bitmap
-            if (debugObj['70'] && !enabledFields.includes(70)) {
-                enabledFields.push(70);
-                console.log(`[DEBUG] Campo 70 agregado a bits encendidos (presente en mensaje pero no en bitmap)`);
-            }
-            
             console.log(`[DEBUG] Bits encendidos en request: ${enabledFields.join(', ')}`);
             
-            // Verificar si el campo 70 está presente
+            // Verificar que el campo 1 está presente (bitmap secundario)
+            if (debugObj['1']) {
+                console.log(`[DEBUG] Campo 1 (Secondary Bitmap) presente: ${debugObj['1']}`);
+            }
+            
+            // Verificar que el campo 70 está presente
             if (debugObj['70']) {
                 console.log(`[DEBUG] Campo 70 presente con valor: ${debugObj['70']}`);
-                if (!enabledFields.includes(70)) {
-                    console.log(`[DEBUG] ADVERTENCIA: Campo 70 presente pero no encendido en bitmap`);
-                    console.log(`[DEBUG] La librería iso8583-js no genera automáticamente el bitmap secundario`);
-                }
             }
             
             // Verificar que NO hay campo 67
@@ -190,9 +198,9 @@ export function deserializeIso8583Message(response: string): Record<string, stri
                 // Si es un campo numérico, verificar si está en el bitmap O si tiene valor (para manejar inconsistencias de la librería)
                 if (!isNaN(Number(key))) {
                     const fieldNum = Number(key);
-                    // Solo incluir los campos específicos que necesitamos: 7, 11, 37, 39, 70
-                    const allowedFields = [7, 11, 37, 39, 70];
-                    if (allowedFields.includes(fieldNum) && (enabledFields.includes(fieldNum) || value !== '')) {
+                    // Solo incluir los campos específicos que necesitamos: 1, 7, 11, 37, 39, 70
+                    const allowedFields = [1, 7, 11, 37, 39, 70];
+                    if (allowedFields.includes(fieldNum) && (enabledFields.includes(fieldNum) || value !== '' || fieldNum === 1)) {
                         // Forzar el valor correcto para el campo 70
                         if (fieldNum === 70) {
                             result[key] = '301';
@@ -217,6 +225,24 @@ export function deserializeIso8583Message(response: string): Record<string, stri
                 console.log(`[DEBUG] Campo ${key} excluido (valor vacío): ${value}`);
             }
         });
+        
+        // Asegurar que el SECONDARY_BITMAP esté incluido si existe
+        if (secondaryBitmapHex && secondaryBitmapHex !== '') {
+            result['SECONDARY_BITMAP'] = secondaryBitmapHex;
+            console.log(`[DEBUG] SECONDARY_BITMAP agregado explícitamente: ${secondaryBitmapHex}`);
+        }
+        
+        // Si no hay SECONDARY_BITMAP pero hay campo 1, usar el valor del campo 1 como bitmap secundario
+        if (!result['SECONDARY_BITMAP'] && result['1']) {
+            result['SECONDARY_BITMAP'] = result['1'];
+            console.log(`[DEBUG] SECONDARY_BITMAP agregado desde campo 1: ${result['1']}`);
+        }
+        
+        // Si aún no hay SECONDARY_BITMAP pero el campo 1 está presente en el mensaje original
+        if (!result['SECONDARY_BITMAP'] && parsed.get('1')) {
+            result['SECONDARY_BITMAP'] = parsed.get('1');
+            console.log(`[DEBUG] SECONDARY_BITMAP agregado desde mensaje original campo 1: ${parsed.get('1')}`);
+        }
         
         console.log(`[DEBUG] Resultado final: ${JSON.stringify(result)}`);
         return result;
@@ -872,35 +898,57 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                                 • Tasa de éxito: ${connectionMetrics.length > 0 ? ((successfulCount / connectionMetrics.length) * 100).toFixed(2) : '0'}%<br>
                                 • Transacciones totales: ${connectionMetrics.length}
                             </div>
-                            ${connectionMetrics.map((metric, index) => `
-                                <div class="iteration-details" style="margin: 15px 0; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #fafafa;">
-                                    <div class="iteration-header">
-                                        Iteración ${metric.iteration} (Hilo ${metric.threadId}) - ${metric.success ? '✅ Exitoso' : '❌ Fallido'}
+                            ${(() => {
+                                // Asegurar que el campo SECONDARY_BITMAP esté presente en los detalles antes de pasarlos al HTML
+                                function ensureSecondaryBitmap(details: Record<string, any>): Record<string, any> {
+                                    if (!details) return details;
+                                    if (!details['SECONDARY_BITMAP']) {
+                                        if (details['1']) {
+                                            details['SECONDARY_BITMAP'] = details['1'];
+                                        }
+                                    }
+                                    return details;
+                                }
+                                return connectionMetrics.map((metric, index) => `
+                                    <div class="iteration-details" style="margin: 15px 0; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #fafafa;">
+                                        <div class="iteration-header">
+                                            Iteración ${metric.iteration} (Hilo ${metric.threadId}) - ${metric.success ? '✅ Exitoso' : '❌ Fallido'}
+                                        </div>
+                                        <div>⏱️ Tiempo de respuesta: ${metric.responseTime}ms</div>
+                                        <div>🕐 Timestamp: ${metric.timestamp}</div>
+                                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px;">
+                                            <div class="message-box" style="margin: 0;">
+                                                <h4>📤 Request (MTI 0800)</h4>
+                                                <div class="field-list">
+                                                    ${(() => {
+                                                        const details = { ...metric.requestDetails };
+                                                        if (!details['SECONDARY_BITMAP'] && details['1']) {
+                                                            details['SECONDARY_BITMAP'] = details['1'];
+                                                        }
+                                                        return sortFieldsForReport(cleanEmptyFields(details))
+                                                            .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
+                                                            .join('');
+                                                    })()}
+                                                </div>
+                                            </div>
+                                            <div class="message-box" style="margin: 0;">
+                                                <h4>📥 Response (MTI 0810)</h4>
+                                                <div class="field-list">
+                                                    ${(() => {
+                                                        const details = { ...metric.responseDetails };
+                                                        if (!details['SECONDARY_BITMAP'] && details['1']) {
+                                                            details['SECONDARY_BITMAP'] = details['1'];
+                                                        }
+                                                        return sortFieldsForReport(cleanEmptyFields(details))
+                                                            .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
+                                                            .join('');
+                                                    })()}
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div>⏱️ Tiempo de respuesta: ${metric.responseTime}ms</div>
-                                    <div>🕐 Timestamp: ${metric.timestamp}</div>
-                                    ${metric.requestDetails && Object.keys(metric.requestDetails).length > 0 ? `
-                                        <div class="message-box">
-                                            <h4>📤 Request (MTI 0800)</h4>
-                                            <div class="field-list">
-                                                ${Object.entries(cleanEmptyFields(metric.requestDetails || {}))
-                                                    .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
-                                                    .join('')}
-                                            </div>
-                                        </div>
-                                    ` : ''}
-                                    ${metric.responseDetails && Object.keys(metric.responseDetails).length > 0 ? `
-                                        <div class="message-box">
-                                            <h4>📥 Response (MTI 0810)</h4>
-                                            <div class="field-list">
-                                                ${Object.entries(cleanEmptyFields(metric.responseDetails || {}))
-                                                    .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
-                                                    .join('')}
-                                            </div>
-                                        </div>
-                                    ` : ''}
-                                </div>
-                            `).join('')}
+                                `).join('');
+                            })()}
                         </div>
                     `;
                 }).join('');
@@ -1627,16 +1675,38 @@ Ejemplos:
 
 function cleanEmptyFields(obj: Record<string, any>): Record<string, any> {
     const cleaned: Record<string, any> = {};
-    Object.entries(obj).forEach(([key, value]) => {
-        if (value && 
-            value !== '' && 
-            value !== '(vacío)' && 
-            value !== 'undefined' && 
-            value !== 'null' &&
-            value !== undefined &&
-            value !== null) {
+    for (const [key, value] of Object.entries(obj)) {
+        if (value !== undefined && value !== null && value !== '') {
             cleaned[key] = value;
         }
-    });
+    }
     return cleaned;
+}
+
+// Función para ordenar campos del reporte (bitmaps y tipo primero, luego campos de datos)
+function sortFieldsForReport(fields: Record<string, any>): [string, any][] {
+    const priorityFields = ['PRIMARY_BITMAP', 'SECONDARY_BITMAP', 'TYPE', 'TYPE_NAME'];
+    const sortedEntries: [string, any][] = [];
+    
+    // Primero agregar campos prioritarios en orden
+    for (const priorityField of priorityFields) {
+        if (fields[priorityField] !== undefined) {
+            sortedEntries.push([priorityField, fields[priorityField]]);
+        }
+    }
+    
+    // Luego agregar el resto de campos ordenados numéricamente
+    const remainingEntries = Object.entries(fields)
+        .filter(([key]) => !priorityFields.includes(key))
+        .sort(([a], [b]) => {
+            const aNum = parseInt(a);
+            const bNum = parseInt(b);
+            if (!isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum;
+            }
+            return a.localeCompare(b);
+        });
+    
+    sortedEntries.push(...remainingEntries);
+    return sortedEntries;
 }
