@@ -18,7 +18,12 @@
     "type": "git",
     "url": "git+https://github.com/lgallardoc/echotest.git"
   },
-  "keywords": ["tcp", "iso8583", "echo-test", "network"],
+  "keywords": [
+    "tcp",
+    "iso8583",
+    "echo-test",
+    "network"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -37,7 +42,7 @@
   "dependencies": {
     "@types/winston": "^2.4.4",
     "dotenv": "^16.0.3",
-    "iso8583-js": "^1.0.0",
+    "iso_8583": "^2.6.7",
     "winston": "^3.8.2"
   }
 }

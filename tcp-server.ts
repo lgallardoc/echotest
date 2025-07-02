@@ -1,11 +1,11 @@
-/// <reference path="./iso8583-js.d.ts" />
 /// <reference types="node" />
 import * as net from 'net';
 import * as dotenv from 'dotenv';
-import ISO8583 = require('iso8583-js');
+const ISO8583 = require('iso_8583');
 import * as winston from 'winston';
 const cluster: any = require('cluster');
 import * as os from 'os';
+import { Iso8583Message, buildIso8583Message, parseIso8583Message } from './iso8583-lib';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -15,6 +15,13 @@ function serializeIso8583Message(message: string): string {
     const length = message.length.toString().padStart(4, '0');
     // Todo debe ser ASCII, no hexadecimal
     return length + message;
+}
+
+// Función para serializar mensaje ISO 8583 a buffer con header de longitud
+function serializeIso8583MessageBuffer(messageBuffer: Buffer): Buffer {
+    const length = messageBuffer.length.toString().padStart(4, '0');
+    const headerBuffer = Buffer.from(length, 'ascii');
+    return Buffer.concat([headerBuffer, messageBuffer]);
 }
 
 // Configuración de logging
@@ -55,42 +62,51 @@ function handleConnection(socket: net.Socket) {
             
             logger.debug(`Header de longitud (ASCII): ${lengthHeader}, Cuerpo del mensaje (ASCII): ${messageBody}`);
             
-            // Parsear el mensaje ISO 8583 usando el string ASCII del cuerpo
-            const iso8583 = new ISO8583();
+            // Parsear el mensaje ISO 8583 usando iso_8583
             logger.debug(`Intentando parsear mensaje: ${messageBody}`);
             
-            let parsed: Map<string, any>;
             let parsedObj: Record<string, string> = {};
             
             try {
-                parsed = iso8583.unWrapMsg(messageBody);
-                logger.debug(`Parsing exitoso, resultado: ${parsed}`);
+                // Parsear usando la librería ISO 8583
+                const messageString = messageBodyBytes.toString('ascii');
+                logger.debug(`Parseando mensaje ASCII: ${messageString}`);
                 
-                // Convertir el Map a un objeto para el logging y FILTRAR el campo 67
-                parsed.forEach((value: any, key: any) => {
-                    // Solo incluir campos que tienen valor Y NO es el campo 67
-                    if (value && value !== '' && key !== '67') {
-                        parsedObj[key] = value;
-                        logger.debug(`Campo ${key}: ${value}`);
-                    } else if (key === '67') {
-                        logger.debug(`Campo 67 filtrado (no permitido): ${value}`);
+                const parsedMessage = parseIso8583Message(messageString);
+                if (parsedMessage) {
+                    parsedObj['0'] = parsedMessage.mti;
+                    parsedMessage.fields.forEach(field => {
+                        if (field.number !== 67) { // Excluir campo 67
+                            parsedObj[field.number.toString()] = field.value;
+                        }
+                    });
+                    
+                    logger.debug(`Parsing exitoso, resultado: ${JSON.stringify(parsedObj)}`);
+                    
+                    // Verificar campos específicos
+                    Object.keys(parsedObj).forEach(key => {
+                        logger.debug(`Campo ${key}: ${parsedObj[key]}`);
+                    });
+                    
+                    // Verificar que NO hay campo 67
+                    if (parsedObj['67']) {
+                        logger.debug(`ERROR: Campo 67 presente: ${parsedObj['67']}`);
+                    } else {
+                        logger.debug(`✅ Campo 67 correctamente excluido`);
                     }
-                });
-                
-                // Eliminar completamente el campo 67 del objeto parseado
-                if (parsedObj['67']) {
-                    logger.debug(`Campo 67 eliminado del objeto parseado: ${parsedObj['67']}`);
-                    delete parsedObj['67'];
+                    
+                    logger.debug(`Desglose del mensaje recibido (sin campo 67): ${JSON.stringify(parsedObj)}`);
+                } else {
+                    logger.error(`Error: No se pudo parsear el mensaje ISO 8583`);
+                    parsedObj = {};
                 }
-                
-                logger.debug(`Desglose del mensaje recibido (sin campo 67): ${JSON.stringify(parsedObj)}`);
             } catch (parseError) {
                 logger.error(`Error en parsing: ${parseError}`);
-                parsed = new Map();
+                parsedObj = {};
             }
             
             // Verificar si el parsing fue exitoso y si es un mensaje de Echo Test (MTI 0800)
-            const mti = parsed.get('TYPE');
+            const mti = parsedObj['0'];
             logger.debug(`MTI detectado: ${mti}`);
             
             if (mti === '0800') {
@@ -120,29 +136,8 @@ function handleConnection(socket: net.Socket) {
                 const field37 = parsedObj['37'] || '';
                 const field70 = parsedObj['70']; // Usar el valor del request si está presente
                 
-                // Crear nueva instancia para la respuesta e inicializar con campos compatibles con AS/400
-                const responseIso = new ISO8583();
-                
-                // Inicializar la estructura con campos compatibles con AS/400
-                responseIso.init([
-                    [1, { bitmap: 1, length: 16 }],   // Secondary Bitmap (8 bytes en hex)
-                    [7, { bitmap: 7, length: 10 }],   // Transmission Date & Time
-                    [11, { bitmap: 11, length: 6 }],  // Systems Trace Audit Number
-                    [37, { bitmap: 37, length: 12 }], // Retrieval Reference Number
-                    [39, { bitmap: 39, length: 2 }],  // Response Code
-                    [70, { bitmap: 70, length: 3 }]   // Network Management Information Code
-                ]);
-                
-                // Configurar los valores de los campos
-                responseIso.set(1, field1); // Secondary Bitmap (mantener del request)
-                responseIso.set(7, field7); // Transmission Date & Time (mantener del request)
-                responseIso.set(11, field11); // Systems Trace Audit Number (mantener del request)
-                responseIso.set(37, field37); // Retrieval Reference Number (mantener del request)
-                responseIso.set(39, '00'); // Response Code (00 = Approved)
-                
                 // Incluir campo 70 si está presente en el request
                 if (field70) {
-                    responseIso.set(70, field70); // Network Management Information Code (mantener del request)
                     logger.debug(`Campo 70 incluido en respuesta: ${field70}`);
                 } else {
                     logger.debug(`Campo 70 no presente en request, no incluido en respuesta`);
@@ -150,66 +145,58 @@ function handleConnection(socket: net.Socket) {
                 
                 logger.debug(`Campos configurados en respuesta: 1=${field1}, 7=${field7}, 11=${field11}, 37=${field37}, 39=00${field70 ? `, 70=${field70}` : ''}`);
                 
-                const responseMessage = responseIso.wrapMsg('0810');
-                logger.debug(`Respuesta generada: ${responseMessage}`);
+                // Generar respuesta usando la librería ISO 8583
+                const responseMessage: Iso8583Message = {
+                    mti: '0810',
+                    fields: [
+                        { number: 7, value: field7 },
+                        { number: 11, value: field11 },
+                        { number: 37, value: field37 },
+                        { number: 39, value: '00' }
+                    ]
+                };
                 
-                // Parsear la respuesta generada para verificar y mostrar bits encendidos
-                const responseParsed = responseIso.unWrapMsg(responseMessage);
+                // Incluir campo 70 si está presente
+                if (field70) {
+                    responseMessage.fields.push({ number: 70, value: field70 });
+                }
+                
+                const responseString = buildIso8583Message(responseMessage);
+                const responseBuffer = Buffer.from(responseString, 'ascii');
+                logger.debug(`Respuesta generada (ASCII): ${responseString}`);
+                
+                // Parsear la respuesta generada para verificar
                 const responseParsedObj: Record<string, string> = {};
-                responseParsed.forEach((value: any, key: any) => {
-                    // Solo incluir campos que tienen valor Y NO es el campo 67
-                    if (value && value !== '' && key !== '67') {
-                        responseParsedObj[key] = value;
-                    } else if (key === '67') {
-                        logger.debug(`Campo 67 filtrado en respuesta (no permitido): ${value}`);
+                responseParsedObj['0'] = responseMessage.mti;
+                responseMessage.fields.forEach(field => {
+                    if (field.number !== 67) {
+                        responseParsedObj[field.number.toString()] = field.value;
                     }
                 });
                 logger.debug(`Respuesta parseada (sin campo 67): ${JSON.stringify(responseParsedObj)}`);
                 
-                // Mostrar bits encendidos en el response enviado
-                const responseBitmap = responseParsedObj['PRIMARY_BITMAP'];
-                if (responseBitmap) {
-                    let bitmapBin = '';
-                    for (let i = 0; i < responseBitmap.length; i += 2) {
-                        bitmapBin += parseInt(responseBitmap.substr(i, 2), 16).toString(2).padStart(8, '0');
-                    }
-                    const enabledFields: number[] = [];
-                    for (let i = 0; i < bitmapBin.length; i++) {
-                        if (bitmapBin[i] === '1') {
-                            enabledFields.push(i + 1);
-                        }
-                    }
-                    logger.debug(`Bits encendidos en response enviado: ${enabledFields.join(', ')}`);
-                }
-                
                 // Enviar respuesta con header de longitud ASCII
-                const responseWithHeader = serializeIso8583Message(responseMessage);
-                const responseBuffer = Buffer.from(responseWithHeader, 'ascii');
-                socket.write(responseBuffer);
+                const responseWithHeader = serializeIso8583MessageBuffer(responseBuffer);
+                socket.write(responseWithHeader);
                 logger.debug(`Enviando respuesta a ${clientAddress}: ${responseWithHeader}`);
                 logger.info(`Respuesta enviada exitosamente a ${clientAddress}`);
             } else {
                 logger.warn(`Mensaje con MTI no reconocido: ${mti}`);
-                // Enviar respuesta de error
-                const errorIso = new ISO8583();
-                errorIso.set(39, '96'); // Response Code (96 = System malfunction)
-                // No incluir campo 70 en respuesta de error
-                const errorMessage = errorIso.wrapMsg('0810');
-                const errorWithHeader = serializeIso8583Message(errorMessage);
-                const errorBuffer = Buffer.from(errorWithHeader, 'ascii');
-                socket.write(errorBuffer);
+                // Enviar respuesta de error en formato ASCII puro
+                const errorString = '08108220000002000000000000000000096'; // MTI + Primary Bitmap + Campo 39
+                const errorBuffer = Buffer.from(errorString, 'ascii');
+                const errorWithHeader = serializeIso8583MessageBuffer(errorBuffer);
+                socket.write(errorWithHeader);
             }
         } catch (error) {
             logger.error(`Error procesando mensaje de ${clientAddress}: ${error}`);
             // Enviar respuesta de error
             try {
-                const iso8583 = new ISO8583();
-                iso8583.set(39, '96'); // Response Code (96 = System malfunction)
-                // No incluir campo 70 en respuesta de error
-                const errorMessage = iso8583.wrapMsg('0810');
-                const errorWithHeader = serializeIso8583Message(errorMessage);
-                const errorBuffer = Buffer.from(errorWithHeader, 'ascii');
-                socket.write(errorBuffer);
+                // Enviar respuesta de error en formato ASCII puro
+                const errorString = '08108220000002000000000000000000096'; // MTI + Primary Bitmap + Campo 39
+                const errorBuffer = Buffer.from(errorString, 'ascii');
+                const errorWithHeader = serializeIso8583MessageBuffer(errorBuffer);
+                socket.write(errorWithHeader);
             } catch (packError) {
                 logger.error(`Error enviando respuesta de error: ${packError}`);
             }

@@ -1,7 +1,15 @@
-/// <reference path="./iso8583-js.d.ts" />
 import * as net from 'net';
 import * as dotenv from 'dotenv';
-import ISO8583 = require('iso8583-js');
+import { 
+    buildIso8583Message, 
+    parseIso8583Message, 
+    addLengthHeader, 
+    removeLengthHeader,
+    getField,
+    setField,
+    type Iso8583Message,
+    type Iso8583Field
+} from './iso8583-lib';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -20,102 +28,40 @@ export function createIso8583EchoTestMessage(): string {
     const stan = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
     const rrn = '005132' + stan; // RRN basado en STAN
     
-    // Crear instancia de ISO8583 e inicializar con campos compatibles con AS/400
-    const iso = new ISO8583();
+    // Crear mensaje ISO 8583 usando la nueva librería
+    const message: Iso8583Message = {
+        mti: '0800',
+        fields: [
+            { number: 7, value: dateTime.substring(0, 10) },   // Transmission Date & Time
+            { number: 11, value: stan },                       // Systems Trace Audit Number
+            { number: 37, value: rrn },                        // Retrieval Reference Number
+            { number: 70, value: '301' }                       // Network Management Information Code
+        ]
+    };
     
-    // Inicializar la estructura con campos compatibles con AS/400
-    // Campo 1: Secondary Bitmap (16 caracteres = 8 bytes en hex)
-    // Campo 7: Transmission Date & Time (10 caracteres)
-    // Campo 11: Systems Trace Audit Number (6 caracteres)
-    // Campo 37: Retrieval Reference Number (12 caracteres)
-    // Campo 70: Network Management Information Code (3 caracteres)
-    iso.init([
-        [1, { bitmap: 1, length: 16 }],   // Secondary Bitmap (8 bytes en hex)
-        [7, { bitmap: 7, length: 10 }],   // Transmission Date & Time
-        [11, { bitmap: 11, length: 6 }],  // Systems Trace Audit Number
-        [37, { bitmap: 37, length: 12 }], // Retrieval Reference Number
-        [70, { bitmap: 70, length: 3 }]   // Network Management Information Code
-    ]);
+    const isoMessage = buildIso8583Message(message);
     
-    // Establecer los valores de los campos
-    iso.set(1, '0400000000000000'); // Secondary Bitmap (bit 33 encendido para campo 70)
-    iso.set(7, dateTime.substring(0, 10)); // Fecha y hora del mensaje (MMDDhhmmss)
-    iso.set(11, stan); // Número de rastreo del sistema
-    iso.set(37, rrn); // RRN - Número de Referencia
-    iso.set(70, '301'); // Código de gestión (Echo Test)
+    // Debug: verificar el mensaje generado
+    console.log(`[DEBUG] Mensaje generado: ${isoMessage}`);
     
-    // Generar mensaje ISO 8583
-    let isoMessage = iso.wrapMsg('0800'); // MTI 0800 para Network Management Request
-    
-    // Parsear el mensaje generado para verificar que coincide con formato AS/400
+    // Parsear el mensaje generado para verificar
     try {
-        const debugIso = new ISO8583();
-        const debugParsed = debugIso.unWrapMsg(isoMessage);
-        const debugObj: Record<string, string> = {};
-        debugParsed.forEach((value: any, key: any) => {
-            if (value && value !== '') {
-                debugObj[key] = value;
-            }
-        });
-        
-        console.log(`[DEBUG] Mensaje generado - campos con valor: ${JSON.stringify(debugObj)}`);
-        
-        // Verificar bitmap primario y secundario
-        const primaryBitmap = debugObj['PRIMARY_BITMAP'];
-        const secondaryBitmap = debugObj['SECONDARY_BITMAP'];
-        
-        // Si no hay SECONDARY_BITMAP pero hay campo 1, agregarlo
-        if (!secondaryBitmap && debugObj['1']) {
-            debugObj['SECONDARY_BITMAP'] = debugObj['1'];
-            console.log(`[DEBUG] SECONDARY_BITMAP agregado al debug desde campo 1: ${debugObj['1']}`);
-        }
-        
-        if (primaryBitmap) {
-            console.log(`[DEBUG] Bitmap primario: ${primaryBitmap}`);
-            
-            // Mostrar bits encendidos en el bitmap primario
-            let primaryBitmapBin = '';
-            for (let i = 0; i < primaryBitmap.length; i += 2) {
-                primaryBitmapBin += parseInt(primaryBitmap.substr(i, 2), 16).toString(2).padStart(8, '0');
-            }
-            
-            let fullBitmapBin = primaryBitmapBin;
-            let enabledFields: number[] = [];
-            
-            // Si hay bitmap secundario, incluirlo
-            if (secondaryBitmap) {
-                console.log(`[DEBUG] Bitmap secundario: ${secondaryBitmap}`);
-                let secondaryBitmapBin = '';
-                for (let i = 0; i < secondaryBitmap.length; i += 2) {
-                    secondaryBitmapBin += parseInt(secondaryBitmap.substr(i, 2), 16).toString(2).padStart(8, '0');
-                }
-                fullBitmapBin += secondaryBitmapBin;
-            }
-            
-            // Calcular campos encendidos en el bitmap completo
-            for (let i = 0; i < fullBitmapBin.length; i++) {
-                if (fullBitmapBin[i] === '1') {
-                    enabledFields.push(i + 1);
-                }
-            }
-            
-            console.log(`[DEBUG] Bits encendidos en request: ${enabledFields.join(', ')}`);
-            
-            // Verificar que el campo 1 está presente (bitmap secundario)
-            if (debugObj['1']) {
-                console.log(`[DEBUG] Campo 1 (Secondary Bitmap) presente: ${debugObj['1']}`);
-            }
+        const parsedMessage = parseIso8583Message(isoMessage);
+        if (parsedMessage) {
+            console.log(`[DEBUG] Mensaje parseado - campos: ${JSON.stringify(parsedMessage.fields.map(f => `${f.number}:${f.value}`))}`);
             
             // Verificar que el campo 70 está presente
-            if (debugObj['70']) {
-                console.log(`[DEBUG] Campo 70 presente con valor: ${debugObj['70']}`);
+            const field70 = getField(parsedMessage, 70);
+            if (field70) {
+                console.log(`[DEBUG] Campo 70 presente con valor: ${field70}`);
             }
             
             // Verificar que NO hay campo 67
-            if (debugObj['67']) {
-                console.log(`[DEBUG] ERROR: Campo 67 aún presente después de inicializar estructura: ${debugObj['67']}`);
+            const field67 = getField(parsedMessage, 67);
+            if (field67) {
+                console.log(`[DEBUG] ERROR: Campo 67 presente: ${field67}`);
             } else {
-                console.log(`[DEBUG] ✅ Campo 67 correctamente excluido de la estructura`);
+                console.log(`[DEBUG] ✅ Campo 67 correctamente excluido`);
             }
         }
     } catch (error) {
@@ -125,126 +71,92 @@ export function createIso8583EchoTestMessage(): string {
     return isoMessage;
 }
 
-// Serializar el mensaje ISO 8583 a una cadena con header de longitud
+// Función para crear un mensaje ISO 8583 de prueba (Echo Test) - Buffer ASCII puro
+export function createIso8583EchoTestMessageBuffer(): Buffer {
+    // Generar valores únicos para cada mensaje
+    const now = new Date();
+    const dateTime = now.getFullYear().toString().slice(-2) + 
+                    (now.getMonth() + 1).toString().padStart(2, '0') + 
+                    now.getDate().toString().padStart(2, '0') + 
+                    now.getHours().toString().padStart(2, '0') + 
+                    now.getMinutes().toString().padStart(2, '0') + 
+                    now.getSeconds().toString().padStart(2, '0');
+    
+    const stan = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
+    const rrn = '005132' + stan; // RRN basado en STAN
+    
+    // Crear mensaje ISO 8583 en formato ASCII puro como espera AS/400
+    // Formato: MTI + PRIMARY_BITMAP + SECONDARY_BITMAP + campos
+    const mti = '0800';
+    const primaryBitmap = '8220000008000000'; // Campos 7, 11, 37, 70
+    const secondaryBitmap = '0400000000000000'; // Campo 1
+    
+    // Construir el mensaje en formato ASCII puro
+    const isoMessage = mti + primaryBitmap + secondaryBitmap + 
+                      dateTime.substring(0, 10) + // Campo 7
+                      stan + // Campo 11
+                      rrn + // Campo 37
+                      '301'; // Campo 70
+    
+    return Buffer.from(isoMessage, 'ascii');
+}
+
+// Serializar el mensaje ISO 8583 a una cadena con header de longitud ASCII
 export function serializeIso8583Message(message: string): string {
-    // El mensaje ya incluye el MTI, solo agregar el header de longitud
-    const length = message.length.toString().padStart(4, '0');
-    // El header de longitud debe ser ASCII, no hexadecimal
-    return length + message;
+    return addLengthHeader(message);
+}
+
+// Serializar el mensaje ISO 8583 a un buffer con header de longitud ASCII
+export function serializeIso8583MessageBuffer(messageBuffer: Buffer): Buffer {
+    const messageString = messageBuffer.toString('ascii');
+    const messageWithHeader = addLengthHeader(messageString);
+    return Buffer.from(messageWithHeader, 'ascii');
 }
 
 // Deserializar y desglosar el mensaje ISO 8583 recibido considerando header de longitud
-export function deserializeIso8583Message(response: string): Record<string, string> {
+export function deserializeIso8583Message(response: Buffer): Record<string, string> {
     try {
-        // Los primeros 4 caracteres son la longitud
-        const body = response.substring(4);
+        // Los primeros 4 bytes son la longitud
+        const bodyBuffer = response.subarray(4);
+        const bodyString = bodyBuffer.toString('ascii');
         
-        // Parsear el mensaje ISO 8583 usando la librería
-        const iso = new ISO8583();
-        const parsed = iso.unWrapMsg(body);
+        console.log('[DEBUG] Mensaje completo recibido (hex):', response.toString('hex'));
+        console.log('[DEBUG] Header de longitud (ASCII):', response.subarray(0, 4).toString('ascii'));
+        console.log('[DEBUG] Body a parsear (ASCII):', bodyString);
+        console.log('[DEBUG] Longitud del body:', bodyString.length);
         
-        // Obtener el bitmap primario y secundario
-        const primaryBitmapHex = parsed.get('PRIMARY_BITMAP');
-        const secondaryBitmapHex = parsed.get('SECONDARY_BITMAP');
+        // Usar la nueva librería para parsear el mensaje
+        const parsedMessage = parseIso8583Message(bodyString);
         
-        let primaryBitmapBin = '';
-        let secondaryBitmapBin = '';
-        let fullBitmapBin = '';
-        
-        if (primaryBitmapHex) {
-            for (let i = 0; i < primaryBitmapHex.length; i += 2) {
-                primaryBitmapBin += parseInt(primaryBitmapHex.substr(i, 2), 16).toString(2).padStart(8, '0');
-            }
-            fullBitmapBin = primaryBitmapBin;
+        if (!parsedMessage) {
+            console.error('[ERROR] No se pudo parsear el mensaje ISO 8583');
+            return {};
         }
         
-        if (secondaryBitmapHex) {
-            for (let i = 0; i < secondaryBitmapHex.length; i += 2) {
-                secondaryBitmapBin += parseInt(secondaryBitmapHex.substr(i, 2), 16).toString(2).padStart(8, '0');
-            }
-            fullBitmapBin += secondaryBitmapBin;
-        }
+        // Convertir a formato Record para compatibilidad
+        const result: Record<string, string> = {
+            '0': parsedMessage.mti
+        };
         
-        console.log(`[DEBUG] Bitmap primario hexadecimal: ${primaryBitmapHex}`);
-        console.log(`[DEBUG] Bitmap primario binario: ${primaryBitmapBin}`);
-        if (secondaryBitmapHex) {
-            console.log(`[DEBUG] Bitmap secundario hexadecimal: ${secondaryBitmapHex}`);
-            console.log(`[DEBUG] Bitmap secundario binario: ${secondaryBitmapBin}`);
-        }
-        console.log(`[DEBUG] Bitmap completo binario: ${fullBitmapBin}`);
-        
-        // Mostrar qué campos están encendidos en el bitmap completo
-        const enabledFields: number[] = [];
-        for (let i = 0; i < fullBitmapBin.length; i++) {
-            if (fullBitmapBin[i] === '1') {
-                enabledFields.push(i + 1);
-            }
-        }
-        
-        // Verificar si el campo 70 está presente en el mensaje aunque no esté en el bitmap
-        const hasField70 = parsed.get('70') && parsed.get('70') !== '';
-        if (hasField70 && !enabledFields.includes(70)) {
-            enabledFields.push(70);
-            console.log(`[DEBUG] Campo 70 agregado a bits encendidos (presente en mensaje pero no en bitmap)`);
-        }
-        
-        console.log(`[DEBUG] Bits encendidos en response: ${enabledFields.join(', ')}`);
-        
-        // Convertir el Map a un objeto para facilitar el manejo
-        const result: Record<string, string> = {};
-        parsed.forEach((value: any, key: any) => {
-            // Solo incluir campos que están realmente presentes y tienen valor
-            if (value !== undefined && value !== null && value !== '') {
-                // Si es un campo numérico, verificar si está en el bitmap O si tiene valor (para manejar inconsistencias de la librería)
-                if (!isNaN(Number(key))) {
-                    const fieldNum = Number(key);
-                    // Solo incluir los campos específicos que necesitamos: 1, 7, 11, 37, 39, 70
-                    const allowedFields = [1, 7, 11, 37, 39, 70];
-                    if (allowedFields.includes(fieldNum) && (enabledFields.includes(fieldNum) || value !== '' || fieldNum === 1)) {
-                        // Forzar el valor correcto para el campo 70
-                        if (fieldNum === 70) {
-                            result[key] = '301';
-                            console.log(`[DEBUG] Campo ${key} incluido con valor forzado: 301`);
-                        } else {
-                            result[key] = value;
-                            if (enabledFields.includes(fieldNum)) {
-                                console.log(`[DEBUG] Campo ${key} incluido (encendido en bitmap): ${value}`);
-                            } else {
-                                console.log(`[DEBUG] Campo ${key} incluido (valor presente pero no en bitmap): ${value}`);
-                            }
-                        }
-                    } else {
-                        console.log(`[DEBUG] Campo ${key} excluido (no permitido o sin valor): ${value}`);
-                    }
-                } else {
-                    // Campos especiales (PRIMARY_BITMAP, SECONDARY_BITMAP, TYPE, TYPE_NAME, etc.)
-                    result[key] = value;
-                    console.log(`[DEBUG] Campo especial ${key} incluido: ${value}`);
-                }
-            } else {
-                console.log(`[DEBUG] Campo ${key} excluido (valor vacío): ${value}`);
-            }
+        // Agregar todos los campos parseados
+        parsedMessage.fields.forEach(field => {
+            result[field.number.toString()] = field.value;
         });
         
-        // Asegurar que el SECONDARY_BITMAP esté incluido si existe
-        if (secondaryBitmapHex && secondaryBitmapHex !== '') {
-            result['SECONDARY_BITMAP'] = secondaryBitmapHex;
-            console.log(`[DEBUG] SECONDARY_BITMAP agregado explícitamente: ${secondaryBitmapHex}`);
+        console.log('[DEBUG] Mensaje parseado:', JSON.stringify(result));
+        
+        // Verificar campos específicos
+        Object.keys(result).forEach(key => {
+            console.log(`[DEBUG] Campo ${key} incluido:`, result[key]);
+        });
+        
+        // Verificar que NO hay campo 67
+        if (result['67']) {
+            console.log(`[DEBUG] ERROR: Campo 67 presente:`, result['67']);
+        } else {
+            console.log(`[DEBUG] ✅ Campo 67 correctamente excluido`);
         }
         
-        // Si no hay SECONDARY_BITMAP pero hay campo 1, usar el valor del campo 1 como bitmap secundario
-        if (!result['SECONDARY_BITMAP'] && result['1']) {
-            result['SECONDARY_BITMAP'] = result['1'];
-            console.log(`[DEBUG] SECONDARY_BITMAP agregado desde campo 1: ${result['1']}`);
-        }
-        
-        // Si aún no hay SECONDARY_BITMAP pero el campo 1 está presente en el mensaje original
-        if (!result['SECONDARY_BITMAP'] && parsed.get('1')) {
-            result['SECONDARY_BITMAP'] = parsed.get('1');
-            console.log(`[DEBUG] SECONDARY_BITMAP agregado desde mensaje original campo 1: ${parsed.get('1')}`);
-        }
-        
-        console.log(`[DEBUG] Resultado final: ${JSON.stringify(result)}`);
         return result;
     } catch (error) {
         console.error('[ERROR] Error al deserializar mensaje ISO 8583:', error);
@@ -936,10 +848,13 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                                                 <div class="field-list">
                                                     ${(() => {
                                                         const details = { ...metric.responseDetails };
+                                                        console.log(`[DEBUG] Response details antes de procesar:`, details);
                                                         if (!details['SECONDARY_BITMAP'] && details['1']) {
                                                             details['SECONDARY_BITMAP'] = details['1'];
                                                         }
-                                                        return sortFieldsForReport(cleanEmptyFields(details))
+                                                        const cleanedDetails = cleanEmptyFields(details);
+                                                        console.log(`[DEBUG] Response details después de limpiar:`, cleanedDetails);
+                                                        return sortFieldsForReport(cleanedDetails)
                                                             .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
                                                             .join('');
                                                     })()}
@@ -1187,29 +1102,20 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
         clearTimeout(connectionTimeout); // Limpiar el timeout de conexión
         log(`Conectado al servidor TCP en ${host}:${port}`, 'info');
 
-        // Crear y serializar el mensaje ISO 8583
-        const isoMessage = createIso8583EchoTestMessage();
-        log('Elementos del mensaje de request: ' + isoMessage, 'debug');
+        // Crear y serializar el mensaje ISO 8583 (buffer)
+        const isoBuffer = createIso8583EchoTestMessageBuffer();
+        log('Elementos del mensaje de request (buffer): ' + isoBuffer.toString('ascii'), 'debug');
 
-        const serializedMessage = serializeIso8583Message(isoMessage);
-        log('Enviando mensaje ISO 8583: ' + serializedMessage, 'debug');
+        const serializedBuffer = serializeIso8583MessageBuffer(isoBuffer);
+        log('Enviando mensaje ISO 8583 (buffer): ' + serializedBuffer.toString('ascii'), 'debug');
+        log('Enviando mensaje ISO 8583 (hex): ' + serializedBuffer.toString('hex'), 'debug');
 
-        // Guardar el request para el reporte
-        requestMessage = serializedMessage;
+        // Guardar el request para el reporte (en ASCII para compatibilidad)
+        requestMessage = serializedBuffer.toString('ascii');
         // Parsear el mensaje original sin el header de longitud
-        requestDetails = deserializeIso8583Message(serializedMessage);
-        console.log('[DEBUG] Después de deserializar request:', requestDetails);
-
-        // Limpiar campos vacíos inmediatamente después de deserializar
-        requestDetails = cleanEmptyFields(requestDetails);
-        console.log('[DEBUG] Después de limpiar request:', requestDetails);
-
-        // Enviar mensaje
-        // Todo el mensaje debe ser ASCII, no hexadecimal
-        const messageBuffer = Buffer.from(serializedMessage, 'ascii');
-        log(`[DEBUG] Mensaje final a enviar (ASCII): ${serializedMessage}`);
-        log(`[DEBUG] Mensaje final a enviar (HEX): ${messageBuffer.toString('hex')}`);
-        client.write(messageBuffer);
+        // (opcional: puedes ajustar deserializeIso8583Message si lo necesitas)
+        // Enviar mensaje directamente
+        client.write(serializedBuffer);
 
         // Establecer un timeout para la espera de la respuesta de 5 segundos
         responseTimeout = setTimeout(() => {
@@ -1227,7 +1133,7 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
         // Guardar el response para el reporte
         responseMessage = response;
         console.log('[DEBUG] Antes de deserializar response:', response);
-        responseDetails = deserializeIso8583Message(response);
+        responseDetails = deserializeIso8583Message(Buffer.from(response, 'ascii'));
         console.log('[DEBUG] Después de deserializar response:', responseDetails);
 
         // Limpiar campos vacíos inmediatamente después de deserializar
@@ -1445,22 +1351,21 @@ Ejemplos:
             log(`Ejecutando iteración ${iterationNumber} en hilo ${threadId} usando conexión permanente ${connection.id}`, 'info');
 
             // Crear y enviar el mensaje ISO 8583
-            const isoMessage = createIso8583EchoTestMessage();
-            const serializedMessage = serializeIso8583Message(isoMessage);
+            const isoBuffer = createIso8583EchoTestMessageBuffer();
+            const serializedBuffer = serializeIso8583MessageBuffer(isoBuffer);
             
-            requestMessage = serializedMessage;
-            requestDetails = deserializeIso8583Message(serializedMessage);
+            requestMessage = serializedBuffer.toString('ascii');
+            requestDetails = deserializeIso8583Message(Buffer.from(requestMessage, 'ascii'));
             
-            log(`Enviando mensaje ISO 8583 por conexión ${connection.id}: ${serializedMessage}`, 'debug');
+            log(`Enviando mensaje ISO 8583 por conexión ${connection.id}: ${serializedBuffer.toString('ascii')}`, 'debug');
 
             // Configurar listeners para esta iteración específica
             const onData = (data: Buffer) => {
-                const response = data.toString('ascii');
-                log(`Respuesta recibida en iteración ${iterationNumber} (hilo ${threadId}) por conexión ${connection.id}: ${response}`, 'debug');
+                log(`Respuesta recibida en iteración ${iterationNumber} (hilo ${threadId}) por conexión ${connection.id}: ${data.toString('ascii')}`, 'debug');
                 
-                responseMessage = response;
-                console.log('[DEBUG] Antes de deserializar response:', response);
-                responseDetails = deserializeIso8583Message(response);
+                responseMessage = data.toString('ascii');
+                console.log('[DEBUG] Antes de deserializar response:', responseMessage);
+                responseDetails = deserializeIso8583Message(data);
                 console.log('[DEBUG] Después de deserializar response:', responseDetails);
                 
                 // Limpiar campos vacíos inmediatamente después de deserializar
@@ -1520,8 +1425,7 @@ Ejemplos:
             }, responseTimeout);
 
             // Enviar mensaje
-            const messageBuffer = Buffer.from(serializedMessage, 'ascii');
-            connection.socket.write(messageBuffer);
+            connection.socket.write(serializedBuffer);
         });
     }
 
