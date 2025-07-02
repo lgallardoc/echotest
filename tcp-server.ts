@@ -182,8 +182,14 @@ function handleConnection(socket: net.Socket) {
                 logger.info(`Respuesta enviada exitosamente a ${clientAddress}`);
             } else {
                 logger.warn(`Mensaje con MTI no reconocido: ${mti}`);
-                // Enviar respuesta de error en formato ASCII puro
-                const errorString = '08108220000002000000000000000000096'; // MTI + Primary Bitmap + Campo 39
+                // Enviar respuesta de error usando la librería ISO 8583
+                const errorMessage: Iso8583Message = {
+                    mti: '0810',
+                    fields: [
+                        { number: 39, value: '96' } // Error: Invalid MTI
+                    ]
+                };
+                const errorString = buildIso8583Message(errorMessage);
                 const errorBuffer = Buffer.from(errorString, 'ascii');
                 const errorWithHeader = serializeIso8583MessageBuffer(errorBuffer);
                 socket.write(errorWithHeader);
@@ -192,8 +198,14 @@ function handleConnection(socket: net.Socket) {
             logger.error(`Error procesando mensaje de ${clientAddress}: ${error}`);
             // Enviar respuesta de error
             try {
-                // Enviar respuesta de error en formato ASCII puro
-                const errorString = '08108220000002000000000000000000096'; // MTI + Primary Bitmap + Campo 39
+                // Enviar respuesta de error usando la librería ISO 8583
+                const errorMessage: Iso8583Message = {
+                    mti: '0810',
+                    fields: [
+                        { number: 39, value: '96' } // Error: Processing Error
+                    ]
+                };
+                const errorString = buildIso8583Message(errorMessage);
                 const errorBuffer = Buffer.from(errorString, 'ascii');
                 const errorWithHeader = serializeIso8583MessageBuffer(errorBuffer);
                 socket.write(errorWithHeader);

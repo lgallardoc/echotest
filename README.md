@@ -15,6 +15,7 @@
 - **🔧 Compatibilidad AS/400:** Formato de mensajes 100% compatible con sistemas mainframe
 - **🎯 Bitmaps Inteligentes:** Bitmap primario y secundario con validación automática
 - **📋 Vista Lado a Lado:** Request y response mostrados simultáneamente en reportes
+- **🔍 Mensajes Completos:** Visualización de mensajes raw sin parsear para debugging avanzado
 - **📚 Librería ISO8583 Personalizada:** Implementación completa y optimizada del estándar ISO 8583
 - **🔬 Soporte LLVAR/LLLVAR:** Campos de longitud variable con headers ASCII
 - **✅ Tests Optimizados:** Suite de tests funcionales y unitarios completos
@@ -248,13 +249,18 @@ pkill -f "node dist/tcp-server.js"
 
 ## 📊 Características del Reporte
 
-### Vista Lado a Lado
+### Vista Lado a Lado con Mensajes Completos
 
 El reporte HTML ahora incluye una vista lado a lado que muestra:
 
-- **Request (Izquierda):** Mensaje enviado con todos los campos y bitmaps
-- **Response (Derecha):** Mensaje recibido con todos los campos y bitmaps
+- **Request (Izquierda):**
+  - **🔍 Mensaje Completo:** Mensaje raw completo sin parsear (formato ASCII pure)
+  - **📋 Campos Parseados:** Mensaje enviado con todos los campos y bitmaps
+- **Response (Derecha):**
+  - **🔍 Mensaje Completo:** Mensaje raw completo sin parsear (formato ASCII pure)
+  - **📋 Campos Parseados:** Mensaje recibido con todos los campos y bitmaps
 - **Comparación Visual:** Fácil identificación de diferencias entre request y response
+- **Debugging Avanzado:** Análisis completo del protocolo ISO 8583
 
 ### Agrupamiento por Conexiones
 
@@ -278,6 +284,8 @@ El reporte HTML ahora incluye una vista lado a lado que muestra:
 2. **Gráficos de Rendimiento:** Visualización de latencia y throughput
 3. **Detalles por Conexión:** Análisis individual de cada conexión
 4. **Vista Lado a Lado:** Request y response para cada iteración
+   - **🔍 Mensaje Completo:** Mensaje raw sin parsear (formato ASCII pure)
+   - **📋 Campos Parseados:** Campos individuales extraídos del mensaje
 5. **Información de Red:** Detalles de conectividad
 
 ## 🔧 Configuración del Servidor
@@ -419,6 +427,30 @@ El reporte HTML ahora incluye una vista lado a lado que muestra:
 
 - **Reporte HTML:** `tmp/echotest_report_IP_PORT_TIMESTAMP.html`
 - **Logs:** `log/echotest_TIMESTAMP.log`
+
+### 🔍 Debugging y Análisis de Protocolo
+
+El reporte HTML ahora incluye mensajes completos sin parsear que facilitan:
+
+- **Análisis de Headers:** Visualización de headers de longitud ASCII
+- **Verificación de Formato:** Confirmación del formato ASCII pure
+- **Comparación de Mensajes:** Análisis lado a lado de request vs response
+- **Troubleshooting:** Identificación rápida de problemas de protocolo
+- **Validación AS/400:** Verificación de compatibilidad con sistemas mainframe
+
+#### Ejemplo de Mensaje Completo en Reporte:
+
+```
+🔍 Mensaje Completo:
+00670800822000000800000004000000000000002507021955696034005132696034301
+
+📋 Campos Parseados:
+0: 0800
+7: 2507021955
+11: 696034
+37: 005132696034
+70: 301
+```
 
 ## 🛠️ Desarrollo
 
@@ -700,6 +732,15 @@ node --version
 ```
 
 ## 📋 Changelog
+
+### v1.6.0 - Mensajes Completos en Reportes HTML
+
+- ✅ **Mensajes Completos:** Visualización de mensajes raw sin parsear en reportes HTML
+- ✅ **Debugging Avanzado:** Análisis completo del protocolo ISO 8583 con mensajes completos
+- ✅ **Formato ASCII Pure:** Visualización del formato exacto enviado/recibido
+- ✅ **Comparación Visual:** Fácil comparación entre mensajes enviados y recibidos
+- ✅ **Análisis de Protocolo:** Facilita el análisis de headers de longitud y estructura
+- ✅ **Documentación Actualizada:** README actualizado con nueva funcionalidad
 
 ### v1.5.0 - Optimización y Limpieza del Proyecto
 

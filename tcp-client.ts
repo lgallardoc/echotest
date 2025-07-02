@@ -85,18 +85,21 @@ export function createIso8583EchoTestMessageBuffer(): Buffer {
     const stan = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
     const rrn = '005132' + stan; // RRN basado en STAN
     
-    // Crear mensaje ISO 8583 en formato ASCII puro como espera AS/400
-    // Formato: MTI + PRIMARY_BITMAP + SECONDARY_BITMAP + campos
-    const mti = '0800';
-    const primaryBitmap = '8220000008000000'; // Campos 7, 11, 37, 70
-    const secondaryBitmap = '0400000000000000'; // Campo 1
+    // Crear mensaje ISO 8583 usando la nueva librería (consistente con createIso8583EchoTestMessage)
+    const message: Iso8583Message = {
+        mti: '0800',
+        fields: [
+            { number: 7, value: dateTime.substring(0, 10) },   // Transmission Date & Time
+            { number: 11, value: stan },                       // Systems Trace Audit Number
+            { number: 37, value: rrn },                        // Retrieval Reference Number
+            { number: 70, value: '301' }                       // Network Management Information Code
+        ]
+    };
     
-    // Construir el mensaje en formato ASCII puro
-    const isoMessage = mti + primaryBitmap + secondaryBitmap + 
-                      dateTime.substring(0, 10) + // Campo 7
-                      stan + // Campo 11
-                      rrn + // Campo 37
-                      '301'; // Campo 70
+    const isoMessage = buildIso8583Message(message);
+    
+    // Debug: verificar el mensaje generado
+    console.log(`[DEBUG] Mensaje Buffer generado: ${isoMessage}`);
     
     return Buffer.from(isoMessage, 'ascii');
 }
@@ -831,7 +834,12 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px;">
                                             <div class="message-box" style="margin: 0;">
                                                 <h4>📤 Request (MTI 0800)</h4>
+                                                <div style="margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; font-family: monospace; font-size: 12px; word-break: break-all;">
+                                                    <strong>🔍 Mensaje Completo:</strong><br>
+                                                    ${metric.requestMessage || 'No disponible'}
+                                                </div>
                                                 <div class="field-list">
+                                                    <h5 style="margin: 10px 0 5px 0; color: #666;">📋 Campos Parseados:</h5>
                                                     ${(() => {
                                                         const details = { ...metric.requestDetails };
                                                         if (!details['SECONDARY_BITMAP'] && details['1']) {
@@ -845,7 +853,12 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                                             </div>
                                             <div class="message-box" style="margin: 0;">
                                                 <h4>📥 Response (MTI 0810)</h4>
+                                                <div style="margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; font-family: monospace; font-size: 12px; word-break: break-all;">
+                                                    <strong>🔍 Mensaje Completo:</strong><br>
+                                                    ${metric.responseMessage || 'No disponible'}
+                                                </div>
                                                 <div class="field-list">
+                                                    <h5 style="margin: 10px 0 5px 0; color: #666;">📋 Campos Parseados:</h5>
                                                     ${(() => {
                                                         const details = { ...metric.responseDetails };
                                                         console.log(`[DEBUG] Response details antes de procesar:`, details);
