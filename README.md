@@ -6,6 +6,7 @@
 
 - **🔗 Conexiones Permanentes:** Pool de conexiones TCP persistentes para mejor rendimiento
 - **📊 Reportes Detallados:** Reportes HTML con métricas completas, gráficos interactivos y vista lado a lado
+- **📋 Información de Campos:** Muestra la descripción de cada campo ISO 8583 en los reportes
 - **🌐 Información de Red:** Detalles de IP origen, puerto origen, IP destino y puerto destino
 - **⚡ Multi-threading:** Ejecución paralela con múltiples hilos
 - **📈 Métricas Avanzadas:** Tiempo de respuesta, throughput, latencia y tasa de éxito
@@ -15,6 +16,10 @@
 - **🔧 Compatibilidad AS/400:** Formato de mensajes 100% compatible con sistemas mainframe
 - **🎯 Bitmaps Inteligentes:** Bitmap primario y secundario con validación automática
 - **📋 Vista Lado a Lado:** Request y response mostrados simultáneamente en reportes
+- **🔍 Mensajes Completos:** Visualización de mensajes raw sin parsear para debugging avanzado
+- **📚 Librería ISO8583 Personalizada:** Implementación completa y optimizada del estándar ISO 8583
+- **🔬 Soporte LLVAR/LLLVAR:** Campos de longitud variable con headers ASCII
+- **✅ Tests Optimizados:** Suite de tests funcionales y unitarios completos
 
 ## 🏗️ Arquitectura
 
@@ -22,10 +27,12 @@
 
 - **Cliente TCP Multi-hilo:** Ejecuta pruebas en paralelo
 - **Pool de Conexiones:** Gestiona conexiones permanentes al servidor
+- **Librería ISO8583 Personalizada:** Implementación completa del estándar ISO 8583
 - **Generador de Mensajes ISO 8583:** Crea mensajes de prueba estándar compatibles con AS/400
-- **Sistema de Reportes:** Genera reportes HTML con métricas, gráficos y vista lado a lado
+- **Sistema de Reportes:** Genera reportes HTML con métricas, gráficos, vista lado a lado e información detallada de campos ISO 8583
 - **Sistema de Logging:** Registra eventos y métricas en archivos
 - **Validación de Bitmaps:** Verifica automáticamente la estructura de mensajes
+- **Soporte LLVAR/LLLVAR:** Manejo de campos de longitud variable
 
 ### Flujo de Trabajo
 
@@ -91,12 +98,13 @@ node --version
 }
 ```
 
-### Dependencias Compatibles
+### Dependencias Optimizadas
 
 - **@types/node:** ^14.18.0
 - **typescript:** ^4.9.0
-- **winston:** ^3.8.2
-- **dotenv:** ^16.0.3
+- **winston:** ^3.8.2 (logging avanzado)
+- **dotenv:** ^16.0.3 (variables de entorno)
+- **jest:** ^29.5.0 (testing framework)
 
 ## 🛠️ Instalación
 
@@ -114,13 +122,6 @@ pnpm install
 
 # Compilar TypeScript
 npm run build
-```
-
-### Scripts de Instalación
-
-```bash
-# Instalación automática
-./install.sh
 ```
 
 ## 📖 Uso
@@ -173,15 +174,96 @@ npx ts-node tcp-server.ts [opciones]
 - `--th <hilos>`: Número de hilos del servidor (default: 4)
 - `--help`: Mostrar ayuda
 
+## 📚 Librería ISO8583 Personalizada
+
+### Características de la Librería
+
+- **Implementación Completa:** Soporte para todos los campos ISO 8583 (1-128)
+- **Formato ASCII Pure:** Compatible con sistemas AS/400
+- **Soporte LLVAR/LLLVAR:** Campos de longitud variable con headers ASCII
+- **Bitmap Inteligente:** Generación y parsing automático de bitmaps primario y secundario
+- **Exclusión de Campo 67:** Automática según requerimientos AS/400
+- **Validación de Campos:** Verificación de longitudes y tipos
+- **Logging Detallado:** Debug completo para troubleshooting
+
+### Campos Soportados
+
+| Tipo       | Descripción                               | Ejemplos                                       |
+| ---------- | ----------------------------------------- | ---------------------------------------------- |
+| **FIXED**  | Longitud fija                             | Campo 7 (10 chars), Campo 11 (6 chars)         |
+| **LLVAR**  | Longitud variable con header de 2 dígitos | Campo 2 (PAN), Campo 35 (Track 2)              |
+| **LLLVAR** | Longitud variable con header de 3 dígitos | Campo 36 (Track 3), Campo 48 (Additional Data) |
+
+### Uso de la Librería
+
+```typescript
+import { buildIso8583Message, parseIso8583Message } from "./iso8583-lib";
+
+// Construir mensaje
+const fields = {
+  "0": "0800", // MTI
+  "7": "0512161608", // Transmission Date & Time
+  "11": "059685", // STAN
+  "37": "513200059685", // Retrieval Reference
+  "70": "301", // Network Management
+};
+
+const message = buildIso8583Message(fields);
+
+// Parsear mensaje
+const parsed = parseIso8583Message(Buffer.from(message, "ascii"));
+```
+
+## 🧪 Testing
+
+### Tests Disponibles
+
+```bash
+# Ejecutar todos los tests
+npm test
+
+# Ejecutar solo tests funcionales
+npm test -- --testPathPattern="iso8583-lib|test-llvar"
+
+# Ejecutar tests específicos
+npm test -- iso8583-lib.test.ts
+npm test -- test-llvar-lllvar.ts
+```
+
+### Cobertura de Tests
+
+- **iso8583-lib.test.ts:** 18 tests unitarios de la librería ISO8583
+- **test-llvar-lllvar.ts:** Tests de campos LLVAR/LLLVAR
+- **tcp-client.test.ts:** Tests del cliente (desactivados temporalmente)
+
+### Validación de Funcionalidad
+
+```bash
+# Validación completa del proyecto
+npm run build
+npm test
+./run-server.sh &
+sleep 3
+./run-client.sh --ip 127.0.0.1 --pt 6020 --it 1
+pkill -f "node dist/tcp-server.js"
+```
+
 ## 📊 Características del Reporte
 
-### Vista Lado a Lado
+### Vista Lado a Lado con Mensajes Completos
 
 El reporte HTML ahora incluye una vista lado a lado que muestra:
 
-- **Request (Izquierda):** Mensaje enviado con todos los campos y bitmaps
-- **Response (Derecha):** Mensaje recibido con todos los campos y bitmaps
+- **Request (Izquierda):**
+  - **🔍 Mensaje Completo:** Mensaje raw completo sin parsear (formato ASCII pure)
+  - **📋 Campos Parseados:** Mensaje enviado con todos los campos y bitmaps
+  - **📏 Información de Campos:** MaxLength, Type y Description de cada campo ISO 8583
+- **Response (Derecha):**
+  - **🔍 Mensaje Completo:** Mensaje raw completo sin parsear (formato ASCII pure)
+  - **📋 Campos Parseados:** Mensaje recibido con todos los campos y bitmaps
+  - **📏 Información de Campos:** MaxLength, Type y Description de cada campo ISO 8583
 - **Comparación Visual:** Fácil identificación de diferencias entre request y response
+- **Debugging Avanzado:** Análisis completo del protocolo ISO 8583
 
 ### Agrupamiento por Conexiones
 
@@ -205,6 +287,8 @@ El reporte HTML ahora incluye una vista lado a lado que muestra:
 2. **Gráficos de Rendimiento:** Visualización de latencia y throughput
 3. **Detalles por Conexión:** Análisis individual de cada conexión
 4. **Vista Lado a Lado:** Request y response para cada iteración
+   - **🔍 Mensaje Completo:** Mensaje raw sin parsear (formato ASCII pure)
+   - **📋 Campos Parseados:** Campos individuales extraídos del mensaje
 5. **Información de Red:** Detalles de conectividad
 
 ## 🔧 Configuración del Servidor
@@ -224,7 +308,7 @@ El reporte HTML ahora incluye una vista lado a lado que muestra:
 - **Puerto:** 6020 (configurable)
 - **Protocolo:** TCP/IP
 - **Mensajes:** ISO 8583 Echo Test (MTI 0800/0810)
-- **Encoding:** ASCII
+- **Encoding:** ASCII Pure
 
 ## 📈 Ejemplos de Uso
 
@@ -347,24 +431,74 @@ El reporte HTML ahora incluye una vista lado a lado que muestra:
 - **Reporte HTML:** `tmp/echotest_report_IP_PORT_TIMESTAMP.html`
 - **Logs:** `log/echotest_TIMESTAMP.log`
 
+### 📋 Información Detallada de Campos ISO 8583
+
+El reporte HTML ahora incluye información completa de cada campo ISO 8583:
+
+- **📏 MaxLength:** Longitud máxima permitida para el campo
+- **📝 Type:** Tipo de campo (FIXED, LLVAR, LLLVAR)
+- **📄 Description:** Descripción completa del campo según estándar ISO 8583
+
+#### Ejemplo de Campo en Reporte:
+
+```
+Campo 7: 0702230507
+📏 MaxLength: 10 | 📝 Type: FIXED | 📄 Description: Transmission date & time
+
+Campo 11: 376717
+📏 MaxLength: 6 | 📝 Type: FIXED | 📄 Description: Systems trace audit number
+
+Campo 37: 005132376717
+📏 MaxLength: 12 | 📝 Type: FIXED | 📄 Description: Retrieval reference number
+```
+
+### 🔍 Debugging y Análisis de Protocolo
+
+El reporte HTML ahora incluye mensajes completos sin parsear que facilitan:
+
+- **Análisis de Headers:** Visualización de headers de longitud ASCII
+- **Verificación de Formato:** Confirmación del formato ASCII pure
+- **Comparación de Mensajes:** Análisis lado a lado de request vs response
+- **Troubleshooting:** Identificación rápida de problemas de protocolo
+- **Validación AS/400:** Verificación de compatibilidad con sistemas mainframe
+
+#### Ejemplo de Mensaje Completo en Reporte:
+
+```
+🔍 Mensaje Completo:
+00670800822000000800000004000000000000002507021955696034005132696034301
+
+📋 Campos Parseados:
+0: 0800
+7: 2507021955
+11: 696034
+37: 005132696034
+70: 301
+```
+
 ## 🛠️ Desarrollo
 
-### Estructura del Proyecto
+### Estructura del Proyecto Optimizada
 
 ```
 echotest/
-├── tcp-client.ts          # Cliente principal
-├── tcp-server.ts          # Servidor de pruebas
-├── iso8583-js.d.ts        # Definiciones TypeScript
-├── dist/                  # Código compilado
-├── tmp/                   # Reportes HTML
-├── log/                   # Archivos de log
-├── run-client.sh          # Script del cliente
-├── run-server.sh          # Script del servidor
-├── install.sh             # Script de instalación
-├── package.json           # Configuración del proyecto
-├── tsconfig.json          # Configuración TypeScript
-└── README.md              # Documentación principal
+├── 📁 dist/                    # Código compilado (6 archivos .js)
+├── 📁 log/                     # Archivos de log (limpio)
+├── 📁 tmp/                     # Reportes HTML (limpio)
+├── 📄 iso8583-lib.ts          # Librería ISO8583 personalizada
+├── 📄 iso8583-lib.test.ts     # Tests unitarios de la librería
+├── 📄 test-llvar-lllvar.ts    # Tests de campos LLVAR/LLLVAR
+├── 📄 tcp-server.ts           # Servidor principal
+├── 📄 tcp-client.ts           # Cliente principal
+├── 📄 tcp-client.test.ts      # Tests del cliente (desactivados)
+├── 📄 run-client.sh           # Script del cliente (validado)
+├── 📄 run-server.sh           # Script del servidor (validado)
+├── 📄 package.json            # Configuración del proyecto
+├── 📄 tsconfig.json           # Configuración TypeScript
+├── 📄 jest.config.js          # Configuración de tests
+├── 📄 .gitignore              # Archivos ignorados por Git
+├── 📄 env.example             # Ejemplo de variables de entorno
+└── 📄 README.md               # Documentación principal
 ```
 
 ### Comandos de Desarrollo
@@ -373,14 +507,15 @@ echotest/
 # Compilar TypeScript
 npm run build
 
-# Ejecutar tests
-npm test
-
-# Limpiar archivos generados
-npm run clean
+# Ejecutar tests funcionales
+npm test -- --testPathPattern="iso8583-lib|test-llvar"
 
 # Ejecutar con ts-node (desarrollo)
 npx ts-node tcp-client.ts
+npx ts-node tcp-server.ts
+
+# Validación completa del proyecto
+npm run build && npm test && ./run-server.sh & sleep 3 && ./run-client.sh --ip 127.0.0.1 --pt 6020 --it 1
 ```
 
 ## 🔧 Configuración Avanzada
@@ -433,11 +568,21 @@ CONNECTION_TIMEOUT=30000
 chmod +w tmp/ log/
 ```
 
+#### Tests fallan
+
+```bash
+# Ejecutar solo tests funcionales
+npm test -- --testPathPattern="iso8583-lib|test-llvar"
+
+# Recompilar proyecto
+npm run build
+```
+
 ## 🔧 Compatibilidad con AS/400
 
 ### ✅ Formato de Mensajes Compatible
 
-EchoTest genera mensajes ISO 8583 completamente compatibles con sistemas AS/400. Los mensajes siguen el formato estándar utilizado en entornos mainframe:
+EchoTest genera mensajes ISO 8583 completamente compatibles con sistemas AS/400 usando la librería personalizada. Los mensajes siguen el formato estándar utilizado en entornos mainframe:
 
 #### **Estructura del Mensaje AS/400:**
 
@@ -455,14 +600,28 @@ EchoTest genera mensajes ISO 8583 completamente compatibles con sistemas AS/400.
 
 ### 📊 Campos ISO 8583 Soportados
 
-| Campo  | Descripción                         | Longitud | Bitmap | Valor                    |
-| ------ | ----------------------------------- | -------- | ------ | ------------------------ |
-| **1**  | Secondary Bitmap                    | 16 chars | 1      | `0400000000000000`       |
-| **7**  | Transmission Date & Time            | 10 chars | 7      | `MMDDhhmmss`             |
-| **11** | Systems Trace Audit Number          | 6 chars  | 11     | `STAN`                   |
-| **37** | Retrieval Reference Number          | 12 chars | 37     | `005132STAN`             |
-| **39** | Response Code                       | 2 chars  | 39     | `00` (solo en respuesta) |
-| **70** | Network Management Information Code | 3 chars  | 70     | `301`                    |
+| Campo  | Descripción                         | Longitud | Tipo  | Valor                    |
+| ------ | ----------------------------------- | -------- | ----- | ------------------------ |
+| **1**  | Secondary Bitmap                    | 16 chars | FIXED | `0400000000000000`       |
+| **7**  | Transmission Date & Time            | 10 chars | FIXED | `MMDDhhmmss` (Chile TZ)  |
+| **11** | Systems Trace Audit Number          | 6 chars  | FIXED | `STAN`                   |
+| **37** | Retrieval Reference Number          | 12 chars | FIXED | `005132STAN`             |
+| **39** | Response Code                       | 2 chars  | FIXED | `00` (solo en respuesta) |
+| **70** | Network Management Information Code | 3 chars  | FIXED | `301`                    |
+
+### 📋 Formato de Reporte de Campos
+
+El reporte HTML ahora muestra cada campo parseado con información completa:
+
+**Formato:** `Bit 0 | 📄 Description: MTI | Value: 0810`
+
+Ejemplo:
+
+Bit 0 | 📄 Description: MTI | Value: 0800
+Bit 7 | 📄 Description: Transmission date & time | Value: 0703093041
+Bit 11 | 📄 Description: Systems trace audit number | Value: 926968
+Bit 37 | 📄 Description: Retrieval reference number | Value: 005132677515
+Bit 70 | 📄 Description: Network management information code | Value: 301
 
 ### 🔍 Comparación de Formatos
 
@@ -484,21 +643,24 @@ EchoTest genera mensajes ISO 8583 completamente compatibles con sistemas AS/400.
 - Bitmap primario: `8220000008000000`
 - Bitmap secundario: `0400000000000000`
 - Estructura de campos: 1, 7, 11, 37, 70
-- Formato de fecha/hora: `MMDDhhmmss`
+- Formato de fecha/hora: `MMDDhhmmss` (usando timezone de Chile - America/Santiago)
 - Campo 70: `301` (Echo Test)
 
 ### 🛠️ Configuración Técnica
 
-#### **Inicialización de Estructura ISO8583:**
+#### **Librería ISO8583 Personalizada:**
 
 ```typescript
-iso.init([
-  [1, { bitmap: 1, length: 16 }], // Secondary Bitmap (8 bytes en hex)
-  [7, { bitmap: 7, length: 10 }], // Transmission Date & Time
-  [11, { bitmap: 11, length: 6 }], // Systems Trace Audit Number
-  [37, { bitmap: 37, length: 12 }], // Retrieval Reference Number
-  [70, { bitmap: 70, length: 3 }], // Network Management Information Code
-]);
+// Construcción de mensaje
+const fields = {
+  "0": "0800", // MTI
+  "7": "0512161608", // Transmission Date & Time (MMDDhhmmss, Chile TZ)
+  "11": "059685", // STAN
+  "37": "513200059685", // Retrieval Reference
+  "70": "301", // Network Management
+};
+
+const message = buildIso8583Message(fields);
 ```
 
 #### **Configuración de Bitmaps:**
@@ -609,6 +771,45 @@ node --version
 
 ## 📋 Changelog
 
+### v1.6.3 - Reporte Simplificado de Campos
+
+- ✅ **Formato Simplificado:** Los campos parseados en el reporte HTML ahora muestran solo Bit, Description y Value
+- ✅ **Mejor legibilidad:** Se elimina información redundante para mayor claridad visual
+
+### v1.6.2 - Nuevo Formato de Reporte de Campos
+
+- ✅ **Formato Mejorado:** Campos parseados ahora muestran formato detallado con información completa
+- ✅ **Información Completa:** Cada campo muestra Bit, MaxLength, Type, Description y Value
+- ✅ **Formato Unificado:** "Bit 0 | 📏 MaxLength: 4 | 📝 Type: FIXED | 📄 Description: MTI | Value: 0810"
+
+### v1.6.1 - Corrección de Timestamp Campo 7
+
+- ✅ **Timezone Chile:** Campo 7 (Transmission Date & Time) ahora usa timezone de Chile (America/Santiago)
+- ✅ **Formato MMDDhhmmss:** Implementación robusta con `Intl.DateTimeFormat` para formato correcto
+- ✅ **Consistencia:** Todas las funciones de generación de timestamp actualizadas
+- ✅ **Validación:** Test de formato verifica estructura correcta (10 caracteres, rangos válidos)
+- ✅ **Compatibilidad:** Mantiene compatibilidad total con sistemas AS/400
+
+### v1.6.0 - Mensajes Completos en Reportes HTML
+
+- ✅ **Mensajes Completos:** Visualización de mensajes raw sin parsear en reportes HTML
+- ✅ **Debugging Avanzado:** Análisis completo del protocolo ISO 8583 con mensajes completos
+- ✅ **Formato ASCII Pure:** Visualización del formato exacto enviado/recibido
+- ✅ **Comparación Visual:** Fácil comparación entre mensajes enviados y recibidos
+- ✅ **Análisis de Protocolo:** Facilita el análisis de headers de longitud y estructura
+- ✅ **Documentación Actualizada:** README actualizado con nueva funcionalidad
+
+### v1.5.0 - Optimización y Limpieza del Proyecto
+
+- ✅ **Librería ISO8583 Personalizada:** Implementación completa y optimizada del estándar ISO 8583
+- ✅ **Soporte LLVAR/LLLVAR:** Campos de longitud variable con headers ASCII
+- ✅ **Tests Optimizados:** Suite de tests funcionales y unitarios completos
+- ✅ **Limpieza del Proyecto:** Eliminación de archivos innecesarios y optimización de estructura
+- ✅ **Scripts Validados:** Verificación de sintaxis y permisos de scripts .sh
+- ✅ **Dependencias Optimizadas:** Solo módulos necesarios y actualizados
+- ✅ **Documentación Actualizada:** README completo con nueva estructura y funcionalidades
+- ✅ **Validación Completa:** Tests, servidor y cliente funcionando correctamente
+
 ### v1.4.0 - Vista Lado a Lado y Mejoras en Reportes
 
 - ✅ **Vista lado a lado:** Request y response mostrados simultáneamente en reportes HTML
@@ -648,20 +849,19 @@ node --version
 
 ### v1.0.0 - Versión Inicial
 
-- ✅ Cliente TCP multi-hilo
-- ✅ Servidor TCP multi-hilo
-- ✅ Generación de mensajes ISO 8583
-- ✅ Reportes HTML con gráficos
-- ✅ Sistema de logging
+- ✅ Cliente TCP/IP básico
+- ✅ Soporte para mensajes ISO 8583
+- ✅ Reportes HTML básicos
+- ✅ Multi-threading básico
 
 ## 📄 Licencia
 
-Este proyecto está bajo la Licencia MIT.
+ISC License
 
 ## 🤝 Contribuciones
 
-Las contribuciones son bienvenidas. Por favor, abre un issue o pull request.
+Las contribuciones son bienvenidas. Por favor, abre un issue o pull request para sugerencias y mejoras.
 
----
+## 📞 Soporte
 
-**Nota**: Este sistema está diseñado específicamente para pruebas de Echo Test ISO 8583. Para uso en producción, considere implementar medidas de seguridad adicionales.
+Para soporte técnico o preguntas, por favor abre un issue en el repositorio de GitHub.
