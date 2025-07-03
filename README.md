@@ -6,6 +6,7 @@
 
 - **🔗 Conexiones Permanentes:** Pool de conexiones TCP persistentes para mejor rendimiento
 - **📊 Reportes Detallados:** Reportes HTML con métricas completas, gráficos interactivos y vista lado a lado
+- **📋 Información de Campos:** Muestra la descripción de cada campo ISO 8583 en los reportes
 - **🌐 Información de Red:** Detalles de IP origen, puerto origen, IP destino y puerto destino
 - **⚡ Multi-threading:** Ejecución paralela con múltiples hilos
 - **📈 Métricas Avanzadas:** Tiempo de respuesta, throughput, latencia y tasa de éxito
@@ -28,7 +29,7 @@
 - **Pool de Conexiones:** Gestiona conexiones permanentes al servidor
 - **Librería ISO8583 Personalizada:** Implementación completa del estándar ISO 8583
 - **Generador de Mensajes ISO 8583:** Crea mensajes de prueba estándar compatibles con AS/400
-- **Sistema de Reportes:** Genera reportes HTML con métricas, gráficos y vista lado a lado
+- **Sistema de Reportes:** Genera reportes HTML con métricas, gráficos, vista lado a lado e información detallada de campos ISO 8583
 - **Sistema de Logging:** Registra eventos y métricas en archivos
 - **Validación de Bitmaps:** Verifica automáticamente la estructura de mensajes
 - **Soporte LLVAR/LLLVAR:** Manejo de campos de longitud variable
@@ -256,9 +257,11 @@ El reporte HTML ahora incluye una vista lado a lado que muestra:
 - **Request (Izquierda):**
   - **🔍 Mensaje Completo:** Mensaje raw completo sin parsear (formato ASCII pure)
   - **📋 Campos Parseados:** Mensaje enviado con todos los campos y bitmaps
+  - **📏 Información de Campos:** MaxLength, Type y Description de cada campo ISO 8583
 - **Response (Derecha):**
   - **🔍 Mensaje Completo:** Mensaje raw completo sin parsear (formato ASCII pure)
   - **📋 Campos Parseados:** Mensaje recibido con todos los campos y bitmaps
+  - **📏 Información de Campos:** MaxLength, Type y Description de cada campo ISO 8583
 - **Comparación Visual:** Fácil identificación de diferencias entre request y response
 - **Debugging Avanzado:** Análisis completo del protocolo ISO 8583
 
@@ -428,6 +431,27 @@ El reporte HTML ahora incluye una vista lado a lado que muestra:
 - **Reporte HTML:** `tmp/echotest_report_IP_PORT_TIMESTAMP.html`
 - **Logs:** `log/echotest_TIMESTAMP.log`
 
+### 📋 Información Detallada de Campos ISO 8583
+
+El reporte HTML ahora incluye información completa de cada campo ISO 8583:
+
+- **📏 MaxLength:** Longitud máxima permitida para el campo
+- **📝 Type:** Tipo de campo (FIXED, LLVAR, LLLVAR)
+- **📄 Description:** Descripción completa del campo según estándar ISO 8583
+
+#### Ejemplo de Campo en Reporte:
+
+```
+Campo 7: 0702230507
+📏 MaxLength: 10 | 📝 Type: FIXED | 📄 Description: Transmission date & time
+
+Campo 11: 376717
+📏 MaxLength: 6 | 📝 Type: FIXED | 📄 Description: Systems trace audit number
+
+Campo 37: 005132376717
+📏 MaxLength: 12 | 📝 Type: FIXED | 📄 Description: Retrieval reference number
+```
+
 ### 🔍 Debugging y Análisis de Protocolo
 
 El reporte HTML ahora incluye mensajes completos sin parsear que facilitan:
@@ -579,11 +603,25 @@ EchoTest genera mensajes ISO 8583 completamente compatibles con sistemas AS/400 
 | Campo  | Descripción                         | Longitud | Tipo  | Valor                    |
 | ------ | ----------------------------------- | -------- | ----- | ------------------------ |
 | **1**  | Secondary Bitmap                    | 16 chars | FIXED | `0400000000000000`       |
-| **7**  | Transmission Date & Time            | 10 chars | FIXED | `MMDDhhmmss`             |
+| **7**  | Transmission Date & Time            | 10 chars | FIXED | `MMDDhhmmss` (Chile TZ)  |
 | **11** | Systems Trace Audit Number          | 6 chars  | FIXED | `STAN`                   |
 | **37** | Retrieval Reference Number          | 12 chars | FIXED | `005132STAN`             |
 | **39** | Response Code                       | 2 chars  | FIXED | `00` (solo en respuesta) |
 | **70** | Network Management Information Code | 3 chars  | FIXED | `301`                    |
+
+### 📋 Formato de Reporte de Campos
+
+El reporte HTML ahora muestra cada campo parseado con información completa:
+
+**Formato:** `Bit 0 | 📄 Description: MTI | Value: 0810`
+
+Ejemplo:
+
+Bit 0 | 📄 Description: MTI | Value: 0800
+Bit 7 | 📄 Description: Transmission date & time | Value: 0703093041
+Bit 11 | 📄 Description: Systems trace audit number | Value: 926968
+Bit 37 | 📄 Description: Retrieval reference number | Value: 005132677515
+Bit 70 | 📄 Description: Network management information code | Value: 301
 
 ### 🔍 Comparación de Formatos
 
@@ -605,7 +643,7 @@ EchoTest genera mensajes ISO 8583 completamente compatibles con sistemas AS/400 
 - Bitmap primario: `8220000008000000`
 - Bitmap secundario: `0400000000000000`
 - Estructura de campos: 1, 7, 11, 37, 70
-- Formato de fecha/hora: `MMDDhhmmss`
+- Formato de fecha/hora: `MMDDhhmmss` (usando timezone de Chile - America/Santiago)
 - Campo 70: `301` (Echo Test)
 
 ### 🛠️ Configuración Técnica
@@ -616,7 +654,7 @@ EchoTest genera mensajes ISO 8583 completamente compatibles con sistemas AS/400 
 // Construcción de mensaje
 const fields = {
   "0": "0800", // MTI
-  "7": "0512161608", // Transmission Date & Time
+  "7": "0512161608", // Transmission Date & Time (MMDDhhmmss, Chile TZ)
   "11": "059685", // STAN
   "37": "513200059685", // Retrieval Reference
   "70": "301", // Network Management
@@ -732,6 +770,25 @@ node --version
 ```
 
 ## 📋 Changelog
+
+### v1.6.3 - Reporte Simplificado de Campos
+
+- ✅ **Formato Simplificado:** Los campos parseados en el reporte HTML ahora muestran solo Bit, Description y Value
+- ✅ **Mejor legibilidad:** Se elimina información redundante para mayor claridad visual
+
+### v1.6.2 - Nuevo Formato de Reporte de Campos
+
+- ✅ **Formato Mejorado:** Campos parseados ahora muestran formato detallado con información completa
+- ✅ **Información Completa:** Cada campo muestra Bit, MaxLength, Type, Description y Value
+- ✅ **Formato Unificado:** "Bit 0 | 📏 MaxLength: 4 | 📝 Type: FIXED | 📄 Description: MTI | Value: 0810"
+
+### v1.6.1 - Corrección de Timestamp Campo 7
+
+- ✅ **Timezone Chile:** Campo 7 (Transmission Date & Time) ahora usa timezone de Chile (America/Santiago)
+- ✅ **Formato MMDDhhmmss:** Implementación robusta con `Intl.DateTimeFormat` para formato correcto
+- ✅ **Consistencia:** Todas las funciones de generación de timestamp actualizadas
+- ✅ **Validación:** Test de formato verifica estructura correcta (10 caracteres, rangos válidos)
+- ✅ **Compatibilidad:** Mantiene compatibilidad total con sistemas AS/400
 
 ### v1.6.0 - Mensajes Completos en Reportes HTML
 

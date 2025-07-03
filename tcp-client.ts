@@ -17,13 +17,9 @@ dotenv.config();
 // Función para crear un mensaje ISO 8583 de prueba (Echo Test)
 export function createIso8583EchoTestMessage(): string {
     // Generar valores únicos para cada mensaje
-    const now = new Date();
-    const dateTime = now.getFullYear().toString().slice(-2) + 
-                    (now.getMonth() + 1).toString().padStart(2, '0') + 
-                    now.getDate().toString().padStart(2, '0') + 
-                    now.getHours().toString().padStart(2, '0') + 
-                    now.getMinutes().toString().padStart(2, '0') + 
-                    now.getSeconds().toString().padStart(2, '0');
+    // Generar timestamp en formato MMDDhhmmss (sin año) para campo 7 usando Chile timezone
+    const { MM, DD, hh, mm, ss } = getChileDateParts();
+    const transmissionDateTime = `${MM}${DD}${hh}${mm}${ss}`;
     
     const stan = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
     const rrn = '005132' + stan; // RRN basado en STAN
@@ -32,7 +28,7 @@ export function createIso8583EchoTestMessage(): string {
     const message: Iso8583Message = {
         mti: '0800',
         fields: [
-            { number: 7, value: dateTime.substring(0, 10) },   // Transmission Date & Time
+            { number: 7, value: transmissionDateTime },        // Transmission Date & Time (MMDDhhmmss)
             { number: 11, value: stan },                       // Systems Trace Audit Number
             { number: 37, value: rrn },                        // Retrieval Reference Number
             { number: 70, value: '301' }                       // Network Management Information Code
@@ -74,13 +70,9 @@ export function createIso8583EchoTestMessage(): string {
 // Función para crear un mensaje ISO 8583 de prueba (Echo Test) - Buffer ASCII puro
 export function createIso8583EchoTestMessageBuffer(): Buffer {
     // Generar valores únicos para cada mensaje
-    const now = new Date();
-    const dateTime = now.getFullYear().toString().slice(-2) + 
-                    (now.getMonth() + 1).toString().padStart(2, '0') + 
-                    now.getDate().toString().padStart(2, '0') + 
-                    now.getHours().toString().padStart(2, '0') + 
-                    now.getMinutes().toString().padStart(2, '0') + 
-                    now.getSeconds().toString().padStart(2, '0');
+    // Generar timestamp en formato MMDDhhmmss (sin año) para campo 7 usando Chile timezone
+    const { MM, DD, hh, mm, ss } = getChileDateParts();
+    const transmissionDateTime = `${MM}${DD}${hh}${mm}${ss}`;
     
     const stan = Math.floor(Math.random() * 999999).toString().padStart(6, '0');
     const rrn = '005132' + stan; // RRN basado en STAN
@@ -89,7 +81,7 @@ export function createIso8583EchoTestMessageBuffer(): Buffer {
     const message: Iso8583Message = {
         mti: '0800',
         fields: [
-            { number: 7, value: dateTime.substring(0, 10) },   // Transmission Date & Time
+            { number: 7, value: transmissionDateTime },        // Transmission Date & Time (MMDDhhmmss)
             { number: 11, value: stan },                       // Systems Trace Audit Number
             { number: 37, value: rrn },                        // Retrieval Reference Number
             { number: 70, value: '301' }                       // Network Management Information Code
@@ -846,7 +838,19 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                                                             details['SECONDARY_BITMAP'] = details['1'];
                                                         }
                                                         return sortFieldsForReport(cleanEmptyFields(details))
-                                                            .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
+                                                            .map(([key, value]) => {
+                                                                const fieldNum = parseInt(key);
+                                                                if (!isNaN(fieldNum)) {
+                                                                    const fieldInfo = getFieldInfo(fieldNum);
+                                                                    return `<div class="field-item" style="margin: 4px 0; padding: 6px 10px; background-color: #f8f9fa; border-radius: 4px; border-left: 3px solid #667eea; font-family: monospace; font-size: 0.9em;">
+                                                                        <strong>Bit ${key}</strong> | 📄 Description: ${fieldInfo.description} | <strong>Value: ${value}</strong>
+                                                                    </div>`;
+                                                                } else {
+                                                                    return `<div class="field-item" style="margin: 4px 0; padding: 6px 10px; background-color: #f8f9fa; border-radius: 4px; border-left: 3px solid #999; font-family: monospace; font-size: 0.9em;">
+                                                                        <strong>${key}</strong> | <strong>Value: ${value}</strong>
+                                                                    </div>`;
+                                                                }
+                                                            })
                                                             .join('');
                                                     })()}
                                                 </div>
@@ -868,7 +872,19 @@ function generateHtmlReport(metrics: ResponseMetrics[], host: string, port: numb
                                                         const cleanedDetails = cleanEmptyFields(details);
                                                         console.log(`[DEBUG] Response details después de limpiar:`, cleanedDetails);
                                                         return sortFieldsForReport(cleanedDetails)
-                                                            .map(([key, value]) => `<div class=\"field-item\"><strong>${key}:</strong> ${value}</div>`)
+                                                            .map(([key, value]) => {
+                                                                const fieldNum = parseInt(key);
+                                                                if (!isNaN(fieldNum)) {
+                                                                    const fieldInfo = getFieldInfo(fieldNum);
+                                                                    return `<div class="field-item" style="margin: 4px 0; padding: 6px 10px; background-color: #f8f9fa; border-radius: 4px; border-left: 3px solid #667eea; font-family: monospace; font-size: 0.9em;">
+                                                                        <strong>Bit ${key}</strong> | 📄 Description: ${fieldInfo.description} | <strong>Value: ${value}</strong>
+                                                                    </div>`;
+                                                                } else {
+                                                                    return `<div class="field-item" style="margin: 4px 0; padding: 6px 10px; background-color: #f8f9fa; border-radius: 4px; border-left: 3px solid #999; font-family: monospace; font-size: 0.9em;">
+                                                                        <strong>${key}</strong> | <strong>Value: ${value}</strong>
+                                                                    </div>`;
+                                                                }
+                                                            })
                                                             .join('');
                                                     })()}
                                                 </div>
@@ -1115,8 +1131,24 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
         clearTimeout(connectionTimeout); // Limpiar el timeout de conexión
         log(`Conectado al servidor TCP en ${host}:${port}`, 'info');
 
-        // Crear y serializar el mensaje ISO 8583 (buffer)
-        const isoBuffer = createIso8583EchoTestMessageBuffer();
+        // Generar timestamp en el momento exacto de transmisión
+        const { MM, DD, hh, mm, ss } = getChileDateParts();
+        const transmissionDateTime = `${MM}${DD}${hh}${mm}${ss}`;
+        
+        // Crear mensaje ISO 8583 con timestamp de transmisión
+        const message: Iso8583Message = {
+            mti: '0800',
+            fields: [
+                { number: 7, value: transmissionDateTime },        // Transmission Date & Time (MMDDhhmmss)
+                { number: 11, value: Math.floor(Math.random() * 999999).toString().padStart(6, '0') }, // STAN
+                { number: 37, value: '005132' + Math.floor(Math.random() * 999999).toString().padStart(6, '0') }, // RRN
+                { number: 70, value: '301' }                       // Network Management Information Code
+            ]
+        };
+        
+        const isoMessage = buildIso8583Message(message);
+        const isoBuffer = Buffer.from(isoMessage, 'ascii');
+        
         log('Elementos del mensaje de request (buffer): ' + isoBuffer.toString('ascii'), 'debug');
 
         const serializedBuffer = serializeIso8583MessageBuffer(isoBuffer);
@@ -1125,8 +1157,6 @@ export function createTcpClient(host: string = '10.245.229.25', port: number = 6
 
         // Guardar el request para el reporte (en ASCII para compatibilidad)
         requestMessage = serializedBuffer.toString('ascii');
-        // Parsear el mensaje original sin el header de longitud
-        // (opcional: puedes ajustar deserializeIso8583Message si lo necesitas)
         // Enviar mensaje directamente
         client.write(serializedBuffer);
 
@@ -1363,8 +1393,23 @@ Ejemplos:
             
             log(`Ejecutando iteración ${iterationNumber} en hilo ${threadId} usando conexión permanente ${connection.id}`, 'info');
 
-            // Crear y enviar el mensaje ISO 8583
-            const isoBuffer = createIso8583EchoTestMessageBuffer();
+            // Generar timestamp en el momento exacto de transmisión
+            const { MM, DD, hh, mm, ss } = getChileDateParts();
+            const transmissionDateTime = `${MM}${DD}${hh}${mm}${ss}`;
+            
+            // Crear mensaje ISO 8583 con timestamp de transmisión
+            const message: Iso8583Message = {
+                mti: '0800',
+                fields: [
+                    { number: 7, value: transmissionDateTime },        // Transmission Date & Time (MMDDhhmmss)
+                    { number: 11, value: Math.floor(Math.random() * 999999).toString().padStart(6, '0') }, // STAN
+                    { number: 37, value: '005132' + Math.floor(Math.random() * 999999).toString().padStart(6, '0') }, // RRN
+                    { number: 70, value: '301' }                       // Network Management Information Code
+                ]
+            };
+            
+            const isoMessage = buildIso8583Message(message);
+            const isoBuffer = Buffer.from(isoMessage, 'ascii');
             const serializedBuffer = serializeIso8583MessageBuffer(isoBuffer);
             
             requestMessage = serializedBuffer.toString('ascii');
@@ -1600,6 +1645,144 @@ function cleanEmptyFields(obj: Record<string, any>): Record<string, any> {
     return cleaned;
 }
 
+// Función helper para obtener información del campo ISO 8583
+function getFieldInfo(fieldNumber: number): { maxLength: number; description: string; type: string } {
+    const fieldDefinitions: Record<number, { maxLength: number; type: string; description: string }> = {
+        0: { maxLength: 4, type: 'FIXED', description: 'MTI' },
+        1: { maxLength: 16, type: 'FIXED', description: 'Bitmap secundario' },
+        2: { maxLength: 19, type: 'LLVAR', description: 'Primary account number' },
+        3: { maxLength: 6, type: 'FIXED', description: 'Processing code' },
+        4: { maxLength: 12, type: 'FIXED', description: 'Amount, transaction' },
+        5: { maxLength: 12, type: 'FIXED', description: 'Amount, settlement' },
+        6: { maxLength: 12, type: 'FIXED', description: 'Amount, cardholder billing' },
+        7: { maxLength: 10, type: 'FIXED', description: 'Transmission date & time' },
+        8: { maxLength: 8, type: 'FIXED', description: 'Amount, cardholder billing fee' },
+        9: { maxLength: 8, type: 'FIXED', description: 'Conversion rate, settlement' },
+        10: { maxLength: 8, type: 'FIXED', description: 'Conversion rate, cardholder billing' },
+        11: { maxLength: 6, type: 'FIXED', description: 'Systems trace audit number' },
+        12: { maxLength: 6, type: 'FIXED', description: 'Time, local transaction' },
+        13: { maxLength: 4, type: 'FIXED', description: 'Date, local transaction' },
+        14: { maxLength: 4, type: 'FIXED', description: 'Date, expiration' },
+        15: { maxLength: 4, type: 'FIXED', description: 'Date, settlement' },
+        16: { maxLength: 4, type: 'FIXED', description: 'Date, conversion' },
+        17: { maxLength: 4, type: 'FIXED', description: 'Date, capture' },
+        18: { maxLength: 4, type: 'FIXED', description: 'Merchant type' },
+        19: { maxLength: 3, type: 'FIXED', description: 'Acquiring institution country code' },
+        20: { maxLength: 3, type: 'FIXED', description: 'PAN extended, country code' },
+        21: { maxLength: 3, type: 'FIXED', description: 'Forwarding institution country code' },
+        22: { maxLength: 3, type: 'FIXED', description: 'Point of service entry mode' },
+        23: { maxLength: 3, type: 'FIXED', description: 'Card sequence number' },
+        24: { maxLength: 3, type: 'FIXED', description: 'Function code' },
+        25: { maxLength: 2, type: 'FIXED', description: 'Point of service condition code' },
+        26: { maxLength: 2, type: 'FIXED', description: 'Point of service capture code' },
+        27: { maxLength: 1, type: 'FIXED', description: 'Authorizing identification response length' },
+        28: { maxLength: 9, type: 'FIXED', description: 'Amount, transaction fee' },
+        29: { maxLength: 9, type: 'FIXED', description: 'Amount, settlement fee' },
+        30: { maxLength: 9, type: 'FIXED', description: 'Amount, transaction processing fee' },
+        31: { maxLength: 9, type: 'FIXED', description: 'Amount, settlement processing fee' },
+        32: { maxLength: 11, type: 'LLVAR', description: 'Acquiring institution identification code' },
+        33: { maxLength: 11, type: 'LLVAR', description: 'Forwarding institution identification code' },
+        34: { maxLength: 28, type: 'LLVAR', description: 'Primary account number, extended' },
+        35: { maxLength: 37, type: 'LLVAR', description: 'Track 2 data' },
+        36: { maxLength: 104, type: 'LLLVAR', description: 'Track 3 data' },
+        37: { maxLength: 12, type: 'FIXED', description: 'Retrieval reference number' },
+        38: { maxLength: 6, type: 'FIXED', description: 'Authorization identification response' },
+        39: { maxLength: 2, type: 'FIXED', description: 'Response code' },
+        40: { maxLength: 3, type: 'FIXED', description: 'Service restriction code' },
+        41: { maxLength: 8, type: 'FIXED', description: 'Card acceptor terminal identification' },
+        42: { maxLength: 15, type: 'FIXED', description: 'Card acceptor identification code' },
+        43: { maxLength: 40, type: 'FIXED', description: 'Card acceptor name/location' },
+        44: { maxLength: 25, type: 'LLVAR', description: 'Additional response data' },
+        45: { maxLength: 76, type: 'LLVAR', description: 'Track 1 data' },
+        46: { maxLength: 999, type: 'LLLVAR', description: 'Additional data - ISO' },
+        47: { maxLength: 999, type: 'LLLVAR', description: 'Additional data - national' },
+        48: { maxLength: 999, type: 'LLLVAR', description: 'Additional data - private' },
+        49: { maxLength: 3, type: 'FIXED', description: 'Currency code, transaction' },
+        50: { maxLength: 3, type: 'FIXED', description: 'Currency code, settlement' },
+        51: { maxLength: 3, type: 'FIXED', description: 'Currency code, cardholder billing' },
+        52: { maxLength: 16, type: 'FIXED', description: 'Personal identification number data' },
+        53: { maxLength: 16, type: 'FIXED', description: 'Security related control information' },
+        54: { maxLength: 120, type: 'LLLVAR', description: 'Additional amounts' },
+        55: { maxLength: 999, type: 'LLLVAR', description: 'Reserved ISO' },
+        56: { maxLength: 999, type: 'LLLVAR', description: 'Reserved ISO' },
+        57: { maxLength: 999, type: 'LLLVAR', description: 'Reserved national' },
+        58: { maxLength: 999, type: 'LLLVAR', description: 'Reserved national' },
+        59: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for national use' },
+        60: { maxLength: 7, type: 'FIXED', description: 'Advice/reason code' },
+        61: { maxLength: 999, type: 'LLLVAR', description: 'Reserved private' },
+        62: { maxLength: 999, type: 'LLLVAR', description: 'Reserved private' },
+        63: { maxLength: 999, type: 'LLLVAR', description: 'Reserved private' },
+        64: { maxLength: 16, type: 'FIXED', description: 'Message authentication code (MAC)' },
+        65: { maxLength: 16, type: 'FIXED', description: 'Bitmap terciario' },
+        66: { maxLength: 1, type: 'FIXED', description: 'Settlement code' },
+        67: { maxLength: 2, type: 'FIXED', description: 'Extended payment code' },
+        68: { maxLength: 3, type: 'FIXED', description: 'Receiving institution country code' },
+        69: { maxLength: 3, type: 'FIXED', description: 'Settlement institution country code' },
+        70: { maxLength: 3, type: 'FIXED', description: 'Network management information code' },
+        71: { maxLength: 4, type: 'FIXED', description: 'Message number' },
+        72: { maxLength: 999, type: 'LLLVAR', description: 'Data record' },
+        73: { maxLength: 6, type: 'FIXED', description: 'Date, action' },
+        74: { maxLength: 10, type: 'FIXED', description: 'Credits, number' },
+        75: { maxLength: 10, type: 'FIXED', description: 'Credits, reversal number' },
+        76: { maxLength: 10, type: 'FIXED', description: 'Debits, number' },
+        77: { maxLength: 10, type: 'FIXED', description: 'Debits, reversal number' },
+        78: { maxLength: 10, type: 'FIXED', description: 'Transfer number' },
+        79: { maxLength: 10, type: 'FIXED', description: 'Transfer, reversal number' },
+        80: { maxLength: 10, type: 'FIXED', description: 'Inquiries number' },
+        81: { maxLength: 10, type: 'FIXED', description: 'Authorizations, number' },
+        82: { maxLength: 12, type: 'FIXED', description: 'Credits, processing fee amount' },
+        83: { maxLength: 12, type: 'FIXED', description: 'Credits, transaction fee amount' },
+        84: { maxLength: 12, type: 'FIXED', description: 'Debits, processing fee amount' },
+        85: { maxLength: 12, type: 'FIXED', description: 'Debits, transaction fee amount' },
+        86: { maxLength: 15, type: 'FIXED', description: 'Credits, amount' },
+        87: { maxLength: 15, type: 'FIXED', description: 'Credits, reversal amount' },
+        88: { maxLength: 15, type: 'FIXED', description: 'Debits, amount' },
+        89: { maxLength: 15, type: 'FIXED', description: 'Debits, reversal amount' },
+        90: { maxLength: 42, type: 'FIXED', description: 'Original data elements' },
+        91: { maxLength: 1, type: 'FIXED', description: 'File update code' },
+        92: { maxLength: 2, type: 'FIXED', description: 'File security code' },
+        93: { maxLength: 5, type: 'FIXED', description: 'Response indicator' },
+        94: { maxLength: 7, type: 'FIXED', description: 'Service indicator' },
+        95: { maxLength: 42, type: 'FIXED', description: 'Replacement amounts' },
+        96: { maxLength: 8, type: 'FIXED', description: 'Message security code' },
+        97: { maxLength: 16, type: 'FIXED', description: 'Amount, net settlement' },
+        98: { maxLength: 25, type: 'FIXED', description: 'Payee' },
+        99: { maxLength: 11, type: 'LLVAR', description: 'Settlement institution identification code' },
+        100: { maxLength: 11, type: 'LLVAR', description: 'Receiving institution identification code' },
+        101: { maxLength: 17, type: 'FIXED', description: 'File name' },
+        102: { maxLength: 28, type: 'LLVAR', description: 'Account identification 1' },
+        103: { maxLength: 28, type: 'LLVAR', description: 'Account identification 2' },
+        104: { maxLength: 100, type: 'LLLVAR', description: 'Transaction description' },
+        105: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for ISO use' },
+        106: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for ISO use' },
+        107: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for ISO use' },
+        108: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for ISO use' },
+        109: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for ISO use' },
+        110: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for ISO use' },
+        111: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for ISO use' },
+        112: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for national use' },
+        113: { maxLength: 11, type: 'LLVAR', description: 'Authorizing agent institution id code' },
+        114: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for national use' },
+        115: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for national use' },
+        116: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for national use' },
+        117: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for national use' },
+        118: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for national use' },
+        119: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for national use' },
+        120: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for private use' },
+        121: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for private use' },
+        122: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for private use' },
+        123: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for private use' },
+        124: { maxLength: 255, type: 'LLLVAR', description: 'Info Text' },
+        125: { maxLength: 50, type: 'LLVAR', description: 'Network management information' },
+        126: { maxLength: 6, type: 'LLVAR', description: 'Issuer trace id' },
+        127: { maxLength: 999, type: 'LLLVAR', description: 'Reserved for private use' },
+        128: { maxLength: 16, type: 'FIXED', description: 'Message Authentication code (MAC)' }
+    };
+    
+    const fieldNum = parseInt(fieldNumber.toString());
+    return fieldDefinitions[fieldNum] || { maxLength: 6, type: 'FIXED', description: 'Unknown field' };
+}
+
 // Función para ordenar campos del reporte (bitmaps y tipo primero, luego campos de datos)
 function sortFieldsForReport(fields: Record<string, any>): [string, any][] {
     const priorityFields = ['PRIMARY_BITMAP', 'SECONDARY_BITMAP', 'TYPE', 'TYPE_NAME'];
@@ -1626,4 +1809,23 @@ function sortFieldsForReport(fields: Record<string, any>): [string, any][] {
     
     sortedEntries.push(...remainingEntries);
     return sortedEntries;
+}
+
+// Helper para obtener la fecha/hora local de Chile en formato MMDDhhmmss
+export function getChileDateParts() {
+    const now = new Date();
+    const options = { timeZone: 'America/Santiago', hour12: false };
+    const parts = new Intl.DateTimeFormat('en-US', {
+        ...options,
+        year: '2-digit', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).formatToParts(now);
+    const get = (type: string) => parts.find(p => p.type === type)?.value.padStart(2, '0') || '00';
+    return {
+        MM: get('month'),
+        DD: get('day'),
+        hh: get('hour'),
+        mm: get('minute'),
+        ss: get('second')
+    };
 }
